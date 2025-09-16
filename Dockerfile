@@ -1,29 +1,23 @@
-# Usa un'immagine leggera con Python 3.11
+# Usa immagine slim di Python
 FROM python:3.11-slim
-
-# Installa dipendenze di sistema necessarie per streamlink e altre utility
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Installa streamlink
-RUN pip install --no-cache-dir streamlink
 
 # Imposta la directory di lavoro
 WORKDIR /app
 
-# Copia requirements.txt e installa le dipendenze Python
+# Installa dipendenze di sistema (solo quelle necessarie)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copia requirements e installa dipendenze Python + streamlink
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt streamlink
 
 # Copia il resto del progetto
 COPY . .
 
-# Espone la porta del server Flask
-EXPOSE 5000
-
-# Variabili d'ambiente default (possono essere sovrascritte in docker run)
+# Variabili d'ambiente
 ENV CHANNELS_FILE=/app/channels.json \
     RECORDINGS_DIR=/app/recordings \
     STREAM_QUALITY=best \
@@ -31,8 +25,11 @@ ENV CHANNELS_FILE=/app/channels.json \
     PORT=5000 \
     MAX_FILE_SIZE=1932735283
 
-# Crea la cartella recordings
+# Crea cartella recordings
 RUN mkdir -p /app/recordings
+
+# Espone la porta
+EXPOSE 5000
 
 # Avvia l'app
 CMD ["python", "app.py"]
