@@ -21,10 +21,10 @@ Supporta più canali contemporaneamente, divisione automatica dei file grandi e 
 ## Anteprima
 
 ### Canali
-![channels](docs/screenshot_channels.png)
+![channels](https://github.com/user-attachments/assets/4ef69d2a-2721-4d02-8454-f10923ee8b5f)
 
 ### Registrazioni
-![recordings](docs/screenshot_recordings.png)
+![recordings](https://github.com/user-attachments/assets/41280437-0ff2-4c0e-88a5-2eeb29139340)
 
 ---
 
