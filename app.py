@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, send_from_
 import json, os, subprocess, threading, logging, shutil, time
 from datetime import datetime
 from dotenv import load_dotenv
+import secrets
 
 # CARICAMENTO CONFIGURAZIONE
 # Carica variabili d'ambiente dal file .env (se presente)
