@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
+app.secret_key = secrets.token_hex(32)  # nuova chiave random a ogni avvio
 
 # --- CONFIGURAZIONE ---
 CHANNELS_FILE   = os.getenv("CHANNELS_FILE", "channels.json")     # File JSON dove vengono salvati i canali
