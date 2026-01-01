@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, redirect, url_for, send_from_directory, flash
-import json, os, subprocess, threading, logging, shutil, time
+import json, os, subprocess, threading, logging, shutil, time, copy, concurrent.futures, signal, sys
 from datetime import datetime
 from dotenv import load_dotenv
 import secrets
@@ -24,6 +24,9 @@ MAX_FILE_SIZE   = float(os.getenv("MAX_FILE_SIZE", 1.8 * 1024 * 1024 * 1024))  #
 # LOGGING
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# LOCK GLOBALE PER THREAD SAFETY
+data_lock = threading.Lock()
 
 # PREPARAZIONE CARTELLE
 os.makedirs(RECORDINGS_DIR, exist_ok=True)  # Crea la cartella delle registrazioni se non esiste
@@ -71,6 +74,7 @@ class Recorder:
         self.is_recording = False
         self.lock = threading.Lock()
         self.monitor_thread = None
+        self.log_file = None
 
     def start(self):
         """Avvia la registrazione se non è già attiva."""
@@ -80,7 +84,10 @@ class Recorder:
             self.output_path = os.path.join(RECORDINGS_DIR, generate_filename(self.channel_name))
             cmd = ["streamlink", f"https://twitch.tv/{self.channel_name}", STREAM_QUALITY, "-o", self.output_path]
             try:
-                self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                # Usa un file di log invece di PIPE per evitare che il buffer si riempia (memory leak/hang)
+                log_path = os.path.join(RECORDINGS_DIR, f"{self.channel_name}.log")
+                self.log_file = open(log_path, "a")
+                self.process = subprocess.Popen(cmd, stdout=self.log_file, stderr=self.log_file)
                 self.is_recording = True
                 # Thread che monitora il processo
                 threading.Thread(target=self._monitor_process, daemon=True).start()
@@ -94,9 +101,7 @@ class Recorder:
     def _monitor_process(self):
         """Monitora il processo streamlink e cattura eventuali errori."""
         if self.process:
-            _, stderr = self.process.communicate()
-            if stderr:
-                logger.error(f"Errore registrazione {self.channel_name}: {stderr.decode(errors='ignore')}")
+            self.process.wait()
             with self.lock:
                 self.is_recording = False
 
@@ -130,6 +135,10 @@ class Recorder:
                 except subprocess.TimeoutExpired:
                     self.process.kill()
                 logger.info(f"Registrazione interrotta: {self.channel_name}")
+            
+            if self.log_file:
+                self.log_file.close()
+                self.log_file = None
             self.process = None
             self.is_recording = False
 
@@ -145,21 +154,41 @@ def monitor_channels():
     - Ferma la registrazione se offline o disattivata
     """
     while True:
-        for ch in channels:
-            name = ch['name']
-            ch['online'] = is_channel_online(name)
-            rec = recorders.get(name)
+        try:
+            # Copia la lista per non bloccare il lock durante il check online (che è lento)
+            with data_lock:
+                channels_copy = copy.deepcopy(channels)
 
-            if ch.get('is_recording', False):
-                if ch['online'] and not rec.is_recording:
-                    rec.start()
-                if not ch['online'] and rec.is_recording:
-                    rec.stop()
-            else:
-                if rec.is_recording:
-                    rec.stop()
+            # Check online status (senza lock)
+            online_status = {}
+            # Controllo parallelo per velocizzare il monitoraggio (max 5 check contemporanei)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                future_to_name = {executor.submit(is_channel_online, ch['name']): ch['name'] for ch in channels_copy}
+                for future in concurrent.futures.as_completed(future_to_name):
+                    name = future_to_name[future]
+                    # is_channel_online gestisce già le eccezioni internamente
+                    online_status[name] = future.result()
 
-        save_channels(channels)  # Salva lo stato aggiornato
+            # Applica modifiche e gestisci registrazioni (con lock)
+            with data_lock:
+                for ch in channels:
+                    name = ch['name']
+                    # Aggiorna stato online
+                    ch['online'] = online_status.get(name, False)
+                    
+                    rec = recorders.get(name)
+                    if ch.get('is_recording', False):
+                        if ch['online'] and not rec.is_recording:
+                            rec.start()
+                        if not ch['online'] and rec.is_recording:
+                            rec.stop()
+                    else:
+                        if rec.is_recording:
+                            rec.stop()
+                save_channels(channels)
+        except Exception as e:
+            logger.error(f"Errore nel ciclo di monitoraggio: {e}")
+        
         time.sleep(CHECK_INTERVAL)
 
 # Avvia il thread in background
@@ -179,44 +208,49 @@ def index():
         action = request.form.get('action')
         channel_name = request.form.get('channel', '').strip().lower()
 
+        # Gestione input URL: estrae il nome canale se viene incollato un link completo
+        if "twitch.tv/" in channel_name:
+            channel_name = channel_name.split("twitch.tv/")[-1].split("/")[0].split("?")[0]
+
         # --- Aggiungi canale ---
         if action == 'add' and channel_name:
-            if not any(ch['name'] == channel_name for ch in channels):
-                ch_info = {"name": channel_name, "is_recording": True, "online": False}
-                channels.append(ch_info)
-                save_channels(channels)
-                recorders[channel_name] = Recorder(channel_name)
-                flash(f"Canale {channel_name} aggiunto e in attesa di registrazione.", "success")
-            else:
-                flash("Canale già presente.", "warning")
+            with data_lock:
+                if not any(ch['name'] == channel_name for ch in channels):
+                    ch_info = {"name": channel_name, "is_recording": True, "online": False}
+                    channels.append(ch_info)
+                    save_channels(channels)
+                    recorders[channel_name] = Recorder(channel_name)
+                    flash(f"Canale {channel_name} aggiunto e in attesa di registrazione.", "success")
+                else:
+                    flash("Canale già presente.", "warning")
 
         # --- Pausa / Riprendi ---
         elif action in ('pause', 'resume') and channel_name:
-            ch = next((c for c in channels if c['name'] == channel_name), None)
-            if ch is None:
-                flash("Canale non trovato", "danger")
-            else:
-                rec = recorders.get(channel_name)
-                if action == 'pause':
-                    ch['is_recording'] = False
+            with data_lock:
+                ch = next((c for c in channels if c['name'] == channel_name), None)
+                if ch is None:
+                    flash("Canale non trovato", "danger")
+                else:
+                    rec = recorders.get(channel_name)
+                    if action == 'pause':
+                        ch['is_recording'] = False
+                        if rec and rec.is_recording:
+                            rec.stop()
+                        flash(f"Registrazione di {channel_name} messa in pausa.", "info")
+                    else:  # resume
+                        ch['is_recording'] = True
+                        # Il monitor thread lo avvierà al prossimo ciclo se online
+                        flash(f"Registrazione di {channel_name} ripresa (in attesa se offline).", "success")
                     save_channels(channels)
-                    if rec and rec.is_recording:
-                        rec.stop()
-                    flash(f"Registrazione di {channel_name} messa in pausa.", "info")
-                else:  # resume
-                    ch['is_recording'] = True
-                    save_channels(channels)
-                    if rec and ch.get('online', False) and not rec.is_recording:
-                        rec.start()
-                    flash(f"Registrazione di {channel_name} ripresa (in attesa se offline).", "success")
 
         # --- Rimuovi canale ---
         elif action == 'remove' and channel_name in recorders:
-            recorders[channel_name].stop()
-            del recorders[channel_name]
-            channels = [c for c in channels if c['name'] != channel_name]
-            save_channels(channels)
-            flash(f"Canale {channel_name} rimosso.", "danger")
+            with data_lock:
+                recorders[channel_name].stop()
+                del recorders[channel_name]
+                channels = [c for c in channels if c['name'] != channel_name]
+                save_channels(channels)
+                flash(f"Canale {channel_name} rimosso.", "danger")
 
         return redirect(url_for('index'))
 
@@ -235,10 +269,38 @@ def download_recording(filename):
     """Permette di scaricare le registrazioni dalla cartella RECORDINGS_DIR."""
     return send_from_directory(RECORDINGS_DIR, filename)
 
+@app.route('/delete_recording', methods=['POST'])
+def delete_recording():
+    """Elimina una registrazione specifica."""
+    filename = request.form.get('filename')
+    if filename:
+        # Sicurezza: usa basename per evitare path traversal (es. ../../windows)
+        safe_filename = os.path.basename(filename)
+        file_path = os.path.join(RECORDINGS_DIR, safe_filename)
+        
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                flash(f"File {safe_filename} eliminato con successo.", "success")
+            except Exception as e:
+                logger.error(f"Errore eliminazione file {safe_filename}: {e}")
+                flash(f"Errore durante l'eliminazione: {e}", "danger")
+        else:
+            flash("File non trovato.", "warning")
+            
+    return redirect(url_for('index'))
+
+# GESTIONE CHIUSURA (Graceful Shutdown)
+def signal_handler(sig, frame):
+    logger.info("Ricevuto segnale di stop. Chiusura registrazioni in corso...")
+    # Usa list() per evitare errori se il dizionario cambia durante l'iterazione
+    for name, rec in list(recorders.items()):
+        if rec.is_recording:
+            rec.stop()
+    sys.exit(0)
+
 # AVVIO SERVER
 if __name__ == '__main__':
-    # Avvia subito la registrazione per i canali già attivi e online
-    for ch in channels:
-        if ch.get('is_recording', False) and ch.get('online', False):
-            recorders[ch['name']].start()
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     app.run(host='0.0.0.0', port=PORT)
