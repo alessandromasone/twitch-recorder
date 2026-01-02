@@ -126,8 +126,8 @@ class Recorder:
                 if error_start_time is None:
                     error_start_time = time.time()
                 
-                if time.time() - error_start_time > 120:
-                    logger.error(f"Superata tolleranza errori (120s) per {self.channel_name}. Stop.")
+                if time.time() - error_start_time > 180:
+                    logger.error(f"Superata tolleranza errori (180s) per {self.channel_name}. Stop.")
                     break
                 
                 logger.warning(f"Errore/Crash {self.channel_name}. Riavvio tra 5s...")
