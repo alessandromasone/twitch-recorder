@@ -72,75 +72,103 @@ class Recorder:
         self.process = None
         self.output_path = None
         self.is_recording = False
+        self.stop_requested = False
         self.lock = threading.Lock()
-        self.monitor_thread = None
+        self.manager_thread = None
         self.log_file = None
 
     def start(self):
-        """Avvia la registrazione se non è già attiva."""
+        """Avvia la registrazione in background (con gestione riavvii)."""
         with self.lock:
             if self.is_recording:
                 return
+            self.stop_requested = False
+            self.is_recording = True
+            self.manager_thread = threading.Thread(target=self._recording_manager, daemon=True)
+            self.manager_thread.start()
+            logger.info(f"Avviata registrazione: {self.channel_name}")
+
+    def _recording_manager(self):
+        """Gestisce il ciclo di vita della registrazione, riavviando in caso di errori o split."""
+        error_start_time = None
+
+        while not self.stop_requested:
             self.output_path = os.path.join(RECORDINGS_DIR, generate_filename(self.channel_name))
             cmd = ["streamlink", f"https://twitch.tv/{self.channel_name}", STREAM_QUALITY, "-o", self.output_path]
+            
+            log_path = os.path.join(RECORDINGS_DIR, f"{self.channel_name}.log")
+            process_start_time = time.time()
+
             try:
-                # Usa un file di log invece di PIPE per evitare che il buffer si riempia (memory leak/hang)
-                log_path = os.path.join(RECORDINGS_DIR, f"{self.channel_name}.log")
                 self.log_file = open(log_path, "a")
                 self.process = subprocess.Popen(cmd, stdout=self.log_file, stderr=self.log_file)
-                self.is_recording = True
-                # Thread che monitora il processo
-                threading.Thread(target=self._monitor_process, daemon=True).start()
-                # Thread che controlla la dimensione del file
-                self.monitor_thread = threading.Thread(target=self._monitor_file_size, daemon=True)
-                self.monitor_thread.start()
-                logger.info(f"Avviata registrazione: {self.channel_name}")
+                
+                # Monitor dimensione file dedicato a questo processo
+                size_monitor = threading.Thread(target=self._monitor_file_size, args=(self.process, self.output_path), daemon=True)
+                size_monitor.start()
+
+                self.process.wait()
             except Exception as e:
-                logger.error(f"Errore avvio registrazione {self.channel_name}: {e}")
+                logger.error(f"Errore streamlink {self.channel_name}: {e}")
+            finally:
+                if self.log_file:
+                    self.log_file.close()
+                    self.log_file = None
+                self.process = None
 
-    def _monitor_process(self):
-        """Monitora il processo streamlink e cattura eventuali errori."""
-        if self.process:
-            self.process.wait()
-            with self.lock:
-                self.is_recording = False
+            if self.stop_requested:
+                break
 
-    def _monitor_file_size(self):
-        """Controlla che il file non superi la dimensione massima, altrimenti lo divide."""
-        while self.is_recording and self.process:
+            # Logica riavvio / tolleranza errori
+            duration = time.time() - process_start_time
+            if duration < 20:
+                # Se il processo è durato poco, consideriamo errore
+                if error_start_time is None:
+                    error_start_time = time.time()
+                
+                if time.time() - error_start_time > 120:
+                    logger.error(f"Superata tolleranza errori (120s) per {self.channel_name}. Stop.")
+                    break
+                
+                logger.warning(f"Errore/Crash {self.channel_name}. Riavvio tra 5s...")
+                time.sleep(5)
+            else:
+                # Reset timer se il processo è durato a lungo
+                error_start_time = None
+                logger.info(f"Processo terminato (split o fine). Riavvio immediato {self.channel_name}.")
+                time.sleep(1)
+
+        with self.lock:
+            self.is_recording = False
+
+    def _monitor_file_size(self, current_process, path):
+        """Controlla dimensione file e termina il processo se necessario."""
+        while not self.stop_requested:
+            if current_process.poll() is not None:
+                break
             try:
-                if os.path.exists(self.output_path):
-                    size = os.path.getsize(self.output_path)
+                if os.path.exists(path):
+                    size = os.path.getsize(path)
                     if size >= MAX_FILE_SIZE:
-                        logger.info(f"File {self.output_path} ha raggiunto {size} bytes, creando nuovo file...")
-                        self._split_recording()
+                        logger.info(f"File {path} pieno. Split...")
+                        current_process.terminate()
                         break
             except Exception as e:
-                logger.error(f"Errore controllo dimensione file {self.channel_name}: {e}")
+                pass
             time.sleep(5)  # controlla ogni 5 secondi
-
-    def _split_recording(self):
-        """Ferma la registrazione e la riavvia su un nuovo file."""
-        self.stop()
-        time.sleep(1)  # breve pausa per sicurezza
-        self.start()
 
     def stop(self):
         """Ferma la registrazione in corso."""
         with self.lock:
-            if self.process and self.is_recording:
+            if not self.is_recording:
+                return
+            self.stop_requested = True
+            if self.process:
                 try:
                     self.process.terminate()
-                    self.process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    self.process.kill()
-                logger.info(f"Registrazione interrotta: {self.channel_name}")
-            
-            if self.log_file:
-                self.log_file.close()
-                self.log_file = None
-            self.process = None
-            self.is_recording = False
+                except Exception:
+                    pass
+            logger.info(f"Stop richiesto: {self.channel_name}")
 
 # GLOBAL: CANALI E RECORDER
 channels  = load_channels()  # Carica canali dal file JSON
