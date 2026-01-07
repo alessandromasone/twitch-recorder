@@ -94,7 +94,15 @@ class Recorder:
 
         while not self.stop_requested:
             self.output_path = os.path.join(RECORDINGS_DIR, generate_filename(self.channel_name))
-            cmd = ["streamlink", f"https://twitch.tv/{self.channel_name}", STREAM_QUALITY, "-o", self.output_path]
+            cmd = [
+                "streamlink",
+                "--twitch-disable-ads",
+                "--retry-streams", "180",
+                "--retry-open", "5",
+                f"https://twitch.tv/{self.channel_name}",
+                STREAM_QUALITY,
+                "-o", self.output_path
+            ]
             
             log_path = os.path.join(RECORDINGS_DIR, f"{self.channel_name}.log")
             process_start_time = time.time()
