@@ -97,10 +97,6 @@ class Recorder:
             cmd = [
                 "streamlink",
                 "--twitch-disable-ads",
-                "--retry-streams", "180",
-                "--retry-open", "5",
-                "--hls-segment-timeout", "30",
-                "--hls-playlist-reload-attempts", "5",
                 f"https://twitch.tv/{self.channel_name}",
                 STREAM_QUALITY,
                 "-o", self.output_path
