@@ -99,6 +99,8 @@ class Recorder:
                 "--twitch-disable-ads",
                 "--retry-streams", "180",
                 "--retry-open", "5",
+                "--hls-segment-timeout", "30",
+                "--hls-playlist-reload-attempts", "5",
                 f"https://twitch.tv/{self.channel_name}",
                 STREAM_QUALITY,
                 "-o", self.output_path
@@ -151,6 +153,10 @@ class Recorder:
 
     def _monitor_file_size(self, current_process, path):
         """Controlla dimensione file e termina il processo se necessario."""
+        # Se MAX_FILE_SIZE è <= 0, il monitoraggio è disabilitato
+        if MAX_FILE_SIZE <= 0:
+            return
+
         while not self.stop_requested:
             if current_process.poll() is not None:
                 break
