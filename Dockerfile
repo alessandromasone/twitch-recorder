@@ -1,25 +1,18 @@
-# ── Build stage: streamlink is big, keep final image small ──
 FROM python:3.12-slim AS base
-
 WORKDIR /app
 
-# System deps (ffmpeg for streamlink, tini for PID 1)
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg tini \
  && rm -rf /var/lib/apt/lists/*
 
-# Python deps
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# App code
 COPY app.py .
 COPY templates/ templates/
 
-# Recordings volume
 RUN mkdir -p /data/recordings
 
-# ── Runtime config ──
 ENV CHANNELS_FILE=/data/channels.json \
     RECORDINGS_DIR=/data/recordings \
     STREAM_QUALITY=best \
@@ -29,7 +22,6 @@ ENV CHANNELS_FILE=/data/channels.json \
     LOG_LEVEL=INFO
 
 EXPOSE 5000
-
 VOLUME ["/data"]
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

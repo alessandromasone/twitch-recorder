@@ -8,7 +8,6 @@
 .idea
 __pycache__
 *.pyc
-*.pyo
 venv/
 .venv/
 recordings/
