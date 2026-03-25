@@ -426,6 +426,21 @@ def index():
                         rec.quality = quality
                     _save_channels(_channels)
 
+        elif action == "pause_all":
+            with _lock:
+                for ch in _channels:
+                    ch["is_recording"] = False
+                    rec = _recorders.get(ch["name"])
+                    if rec and rec.is_recording:
+                        rec.stop()
+                _save_channels(_channels)
+
+        elif action == "resume_all":
+            with _lock:
+                for ch in _channels:
+                    ch["is_recording"] = True
+                _save_channels(_channels)
+
         return redirect(url_for("index"))
 
     return render_template("index.html")

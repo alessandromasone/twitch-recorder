@@ -32,13 +32,9 @@
     * { box-sizing: border-box; }
     body {
       font-family: 'DM Sans', system-ui, sans-serif;
-      background: var(--surface);
-      color: var(--text1);
-      margin: 0;
+      background: var(--surface); color: var(--text1); margin: 0;
     }
-
-    /* ── Layout ── */
-    .shell { max-width: 1280px; margin: 0 auto; padding: 16px; }
+    .shell { max-width: 1100px; margin: 0 auto; padding: 16px; }
 
     /* ── Header ── */
     .hdr {
@@ -49,29 +45,30 @@
     .hdr-brand i { color: var(--tw); font-size: 1.4rem; }
     .hdr-right { display: flex; align-items: center; gap: 12px; }
     .hdr-meta { font-size: .75rem; color: var(--text3); display: flex; align-items: center; gap: 4px; }
-    .pulse-dot {
-      width: 6px; height: 6px; border-radius: 50%; background: var(--online);
-      animation: pulse 2s ease infinite;
-    }
+    .pulse-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--online); animation: pulse 2s ease infinite; }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
     .pulse-dot.stale { background: var(--rec); animation: none; }
+    .theme-btn {
+      background: var(--surface3); border: 1px solid var(--border); border-radius: 8px;
+      width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
+      color: var(--text2); cursor: pointer; transition: all .15s;
+    }
+    .theme-btn:hover { border-color: var(--tw); color: var(--tw); }
 
     /* ── Stats strip ── */
     .stats-strip {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
       gap: 8px; margin-bottom: 12px;
     }
     .stat-pill {
       background: var(--surface2); border: 1px solid var(--border);
       border-radius: 10px; padding: 10px 14px;
-      display: flex; align-items: center; gap: 10px;
-      transition: border-color .2s;
+      display: flex; align-items: center; gap: 10px; transition: border-color .2s;
     }
     .stat-pill:hover { border-color: var(--tw); }
     .stat-icon {
       width: 36px; height: 36px; border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1rem; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center; font-size: 1rem; flex-shrink: 0;
     }
     .stat-val { font-size: 1.25rem; font-weight: 700; line-height: 1; }
     .stat-lbl { font-size: .68rem; color: var(--text3); text-transform: uppercase; letter-spacing: .05em; }
@@ -91,17 +88,21 @@
     }
     .add-bar form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .add-bar input[type="text"] {
-      flex: 1; min-width: 200px; background: var(--surface3);
+      flex: 1; min-width: 180px; background: var(--surface3);
       border: 1px solid var(--border); border-radius: 8px;
       padding: 8px 12px; color: var(--text1); font-size: .88rem;
       font-family: inherit; outline: none; transition: border-color .2s;
     }
     .add-bar input[type="text"]:focus { border-color: var(--tw); }
     .add-bar input::placeholder { color: var(--text3); }
-    .add-bar select {
+    .add-bar select, .ch-quality-select {
       background: var(--surface3); border: 1px solid var(--border);
       border-radius: 8px; padding: 8px 10px; color: var(--text1);
       font-family: inherit; font-size: .82rem; outline: none;
+    }
+    .ch-quality-select {
+      border-radius: 5px; padding: 2px 6px; color: var(--text2);
+      font-family: 'JetBrains Mono', monospace; font-size: .7rem;
     }
     .btn-tw {
       background: var(--tw); color: #fff; border: none; border-radius: 8px;
@@ -112,36 +113,44 @@
     .btn-tw:hover { background: var(--tw-dim); }
     .btn-tw:active { transform: scale(.97); }
 
-    /* ── Panels grid ── */
-    .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    @media (max-width: 900px) { .panels { grid-template-columns: 1fr; } }
-
+    /* ── Panel (shared) ── */
     .panel {
       background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;
+      border-radius: 12px; overflow: hidden; margin-bottom: 16px;
     }
     .panel-hdr {
       padding: 10px 14px; font-weight: 600; font-size: .85rem;
       border-bottom: 1px solid var(--border);
-      display: flex; justify-content: space-between; align-items: center;
+      display: flex; justify-content: space-between; align-items: center; gap: 8px;
     }
+    .panel-hdr-left { display: flex; align-items: center; gap: 8px; }
     .panel-hdr .badge-count {
       background: var(--tw-glow); color: var(--tw);
       border-radius: 6px; padding: 2px 8px; font-size: .72rem; font-weight: 600;
     }
 
-    /* ── Channel cards ── */
-    .ch-list { flex: 1; overflow-y: auto; max-height: 520px; }
+    /* ── Bulk action buttons ── */
+    .bulk-btns { display: flex; gap: 4px; }
+    .bulk-btn {
+      background: transparent; border: 1px solid var(--border); border-radius: 6px;
+      padding: 3px 10px; color: var(--text2); cursor: pointer;
+      font-family: inherit; font-size: .7rem; font-weight: 500;
+      transition: all .15s; display: inline-flex; align-items: center; gap: 4px;
+    }
+    .bulk-btn:hover { border-color: var(--text2); color: var(--text1); background: var(--surface3); }
+    .bulk-btn.bp:hover { border-color: #fbbf24; color: #fbbf24; }
+    .bulk-btn.br:hover { border-color: var(--online); color: var(--online); }
+
+    /* ── Channel list (auto height, no stretch) ── */
+    .ch-list { max-height: 400px; overflow-y: auto; }
     .ch-list::-webkit-scrollbar { width: 4px; }
     .ch-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
     .ch-card {
-      padding: 10px 14px; border-bottom: 1px solid var(--border);
-      transition: background .15s;
+      padding: 10px 14px; border-bottom: 1px solid var(--border); transition: background .15s;
     }
     .ch-card:hover { background: var(--surface3); }
     .ch-card:last-child { border-bottom: none; }
-
     .ch-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
     .ch-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .ch-name {
@@ -149,11 +158,10 @@
       text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .ch-name:hover { color: var(--tw); }
-
     .ch-badges { display: flex; gap: 4px; flex-shrink: 0; }
     .badge-sm {
-      font-size: .65rem; font-weight: 600; padding: 2px 7px;
-      border-radius: 4px; text-transform: uppercase; letter-spacing: .03em;
+      font-size: .65rem; font-weight: 600; padding: 2px 7px; border-radius: 4px;
+      text-transform: uppercase; letter-spacing: .03em;
       display: inline-flex; align-items: center; gap: 3px;
     }
     .badge-online { background: rgba(34,197,94,.12); color: #22c55e; }
@@ -161,43 +169,26 @@
     .badge-rec { background: rgba(239,68,68,.12); color: #ef4444; }
     .badge-paused { background: rgba(251,191,36,.1); color: #fbbf24; }
     .badge-waiting { background: rgba(145,70,255,.1); color: var(--tw); }
-
-    .dot-rec {
-      width: 6px; height: 6px; border-radius: 50%; background: var(--rec);
-      animation: pulse 1.2s ease infinite;
-    }
-
+    .dot-rec { width: 6px; height: 6px; border-radius: 50%; background: var(--rec); animation: pulse 1.2s ease infinite; }
     .ch-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .ch-quality-row { display: flex; align-items: center; gap: 6px; }
     .ch-quality-label { font-size: .7rem; color: var(--text3); }
-    .ch-quality-select {
-      background: var(--surface3); border: 1px solid var(--border);
-      border-radius: 5px; padding: 2px 6px; color: var(--text2);
-      font-family: 'JetBrains Mono', monospace; font-size: .7rem; outline: none;
-    }
-
     .ch-actions { display: flex; gap: 4px; }
     .ch-btn {
-      background: transparent; border: 1px solid var(--border);
-      border-radius: 6px; padding: 4px 8px; color: var(--text2);
-      cursor: pointer; font-size: .78rem; transition: all .15s;
-      display: inline-flex; align-items: center; gap: 3px;
+      background: transparent; border: 1px solid var(--border); border-radius: 6px;
+      padding: 4px 8px; color: var(--text2); cursor: pointer; font-size: .78rem;
+      transition: all .15s; display: inline-flex; align-items: center; gap: 3px;
     }
     .ch-btn:hover { border-color: var(--text2); color: var(--text1); background: var(--surface3); }
     .ch-btn.btn-pause:hover { border-color: #fbbf24; color: #fbbf24; }
     .ch-btn.btn-play:hover { border-color: var(--online); color: var(--online); }
     .ch-btn.btn-del:hover { border-color: var(--rec); color: var(--rec); }
+    .uptime-tag { font-family: 'JetBrains Mono', monospace; font-size: .65rem; color: var(--text3); margin-left: 4px; }
 
-    .uptime-tag {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: .65rem; color: var(--text3); margin-left: 4px;
-    }
-
-    /* ── Recordings ── */
-    .rec-list { flex: 1; overflow-y: auto; max-height: 520px; }
+    /* ── Recordings list (auto height, independent) ── */
+    .rec-list { max-height: 400px; overflow-y: auto; }
     .rec-list::-webkit-scrollbar { width: 4px; }
     .rec-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
     .rec-item {
       padding: 8px 14px; border-bottom: 1px solid var(--border);
       display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -205,58 +196,23 @@
     }
     .rec-item:hover { background: var(--surface3); }
     .rec-item:last-child { border-bottom: none; }
-
     .rec-info { min-width: 0; flex: 1; }
-    .rec-name {
-      font-size: .82rem; font-weight: 500; white-space: nowrap;
-      overflow: hidden; text-overflow: ellipsis; display: block;
-    }
+    .rec-name { font-size: .82rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
     .rec-meta { font-size: .7rem; color: var(--text3); }
-
     .rec-actions { display: flex; gap: 3px; flex-shrink: 0; }
     .rec-btn {
-      background: transparent; border: 1px solid var(--border);
-      border-radius: 5px; width: 30px; height: 30px;
-      display: flex; align-items: center; justify-content: center;
+      background: transparent; border: 1px solid var(--border); border-radius: 5px;
+      width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
       color: var(--text2); cursor: pointer; transition: all .15s; font-size: .82rem;
     }
     .rec-btn:hover { border-color: var(--tw); color: var(--tw); background: var(--tw-glow); }
     .rec-btn.del:hover { border-color: var(--rec); color: var(--rec); background: rgba(239,68,68,.08); }
     .rec-btn a { color: inherit; text-decoration: none; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 
-    /* ── Video modal ── */
-    .video-backdrop {
-      display: none; position: fixed; inset: 0;
-      background: rgba(0,0,0,.85); z-index: 2000;
-      align-items: center; justify-content: center;
-      animation: fadeIn .2s ease;
-    }
-    .video-backdrop.open { display: flex; }
-    @keyframes fadeIn { from{opacity:0} to{opacity:1} }
-
-    .video-modal {
-      background: #0e0e10; border-radius: 12px; overflow: hidden;
-      width: 90vw; max-width: 960px; box-shadow: 0 20px 60px rgba(0,0,0,.6);
-      position: relative;
-    }
-    .video-modal-hdr {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 10px 14px; background: #18181b;
-    }
-    .video-modal-title { font-size: .85rem; font-weight: 600; color: #efeff1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .video-modal-close {
-      background: none; border: none; color: #adadb8; font-size: 1.2rem;
-      cursor: pointer; padding: 4px 8px; border-radius: 6px;
-    }
-    .video-modal-close:hover { background: #26262c; color: #fff; }
-    .video-modal video {
-      width: 100%; max-height: 70vh; display: block; background: #000;
-    }
-
     /* ── Empty state ── */
     .empty-state {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
-      padding: 40px 20px; color: var(--text3); text-align: center;
+      padding: 32px 20px; color: var(--text3); text-align: center;
     }
     .empty-state i { font-size: 2rem; margin-bottom: 8px; opacity: .4; }
     .empty-state p { font-size: .85rem; margin: 0; }
@@ -285,40 +241,19 @@
     .confirm-btns .btn-danger:hover { background: #dc2626; }
     .confirm-btns button:not(.btn-danger):hover { background: var(--border); }
 
-    /* ── Theme toggle ── */
-    .theme-btn {
-      background: var(--surface3); border: 1px solid var(--border);
-      border-radius: 8px; width: 34px; height: 34px;
-      display: flex; align-items: center; justify-content: center;
-      color: var(--text2); cursor: pointer; transition: all .15s;
-    }
-    .theme-btn:hover { border-color: var(--tw); color: var(--tw); }
-
     /* ── Toasts ── */
     .toast-rack { position: fixed; top: 12px; right: 12px; z-index: 4000; display: flex; flex-direction: column; gap: 6px; }
   </style>
 </head>
 <body>
 
-<!-- Toast rack -->
 <div class="toast-rack" id="toastRack"></div>
-
-<!-- Video player modal -->
-<div class="video-backdrop" id="videoBackdrop" onclick="closeVideo(event)">
-  <div class="video-modal">
-    <div class="video-modal-hdr">
-      <span class="video-modal-title" id="videoTitle"></span>
-      <button class="video-modal-close" onclick="closeVideoPlayer()">&times;</button>
-    </div>
-    <video id="videoPlayer" controls preload="metadata"></video>
-  </div>
-</div>
 
 <!-- Confirm remove channel -->
 <div class="confirm-backdrop" id="confirmRemove">
   <div class="confirm-box">
     <p>Rimuovere <strong id="confirmChName"></strong>?</p>
-    <form method="post" id="confirmRemoveForm">
+    <form method="post">
       <input type="hidden" name="channel" id="confirmChInput">
       <input type="hidden" name="action" value="remove">
       <div class="confirm-btns">
@@ -333,7 +268,7 @@
 <div class="confirm-backdrop" id="confirmDelete">
   <div class="confirm-box">
     <p>Eliminare <strong id="confirmFileName" style="word-break:break-all"></strong>?</p>
-    <form method="post" action="/delete_recording" id="confirmDeleteForm">
+    <form method="post" action="/delete_recording">
       <input type="hidden" name="filename" id="confirmFileInput">
       <div class="confirm-btns">
         <button type="button" onclick="closeConfirm('confirmDelete')">Annulla</button>
@@ -356,14 +291,12 @@
         <span class="pulse-dot" id="refreshDot"></span>
         <span>Live <span id="countdown"></span></span>
       </div>
-      <button class="theme-btn" id="themeToggle" title="Tema">
-        <i class="bi bi-circle-half"></i>
-      </button>
+      <button class="theme-btn" id="themeToggle" title="Tema"><i class="bi bi-circle-half"></i></button>
     </div>
   </div>
 
   <!-- Stats -->
-  <div class="stats-strip" id="statsStrip">
+  <div class="stats-strip">
     <div class="stat-pill">
       <div class="stat-icon" style="background:rgba(145,70,255,.1);color:var(--tw)"><i class="bi bi-people-fill"></i></div>
       <div><div class="stat-val" id="sChannels">—</div><div class="stat-lbl">Canali</div></div>
@@ -417,32 +350,38 @@
     </form>
   </div>
 
-  <!-- Panels -->
-  <div class="panels">
-
-    <!-- Channels -->
-    <div class="panel">
-      <div class="panel-hdr">
+  <!-- ═══ Canali (indipendente) ═══ -->
+  <div class="panel">
+    <div class="panel-hdr">
+      <div class="panel-hdr-left">
         <span><i class="bi bi-collection-play me-1"></i>Canali</span>
         <span class="badge-count" id="chCount">0</span>
       </div>
-      <div class="ch-list" id="chList">
-        <div class="empty-state"><i class="bi bi-tv"></i><p>Caricamento…</p></div>
+      <div class="bulk-btns" id="bulkBtns" style="display:none">
+        <form method="post" style="display:contents">
+          <button type="submit" name="action" value="pause_all" class="bulk-btn bp"><i class="bi bi-pause-fill"></i> Pausa tutti</button>
+          <button type="submit" name="action" value="resume_all" class="bulk-btn br"><i class="bi bi-play-fill"></i> Riprendi tutti</button>
+        </form>
       </div>
     </div>
+    <div class="ch-list" id="chList">
+      <div class="empty-state"><i class="bi bi-tv"></i><p>Caricamento…</p></div>
+    </div>
+  </div>
 
-    <!-- Recordings -->
-    <div class="panel">
-      <div class="panel-hdr">
+  <!-- ═══ Registrazioni (indipendente) ═══ -->
+  <div class="panel">
+    <div class="panel-hdr">
+      <div class="panel-hdr-left">
         <span><i class="bi bi-film me-1"></i>Registrazioni</span>
         <span class="badge-count" id="recTotalSize">—</span>
       </div>
-      <div class="rec-list" id="recList">
-        <div class="empty-state"><i class="bi bi-inbox"></i><p>Caricamento…</p></div>
-      </div>
     </div>
-
+    <div class="rec-list" id="recList">
+      <div class="empty-state"><i class="bi bi-inbox"></i><p>Caricamento…</p></div>
+    </div>
   </div>
+
 </div>
 
 <script>
@@ -488,7 +427,6 @@
 
   // ── Render ──
   function render(d) {
-    // Stats
     document.getElementById("sChannels").textContent = d.stats.total_channels;
     document.getElementById("sOnline").textContent = d.stats.online_channels;
     document.getElementById("sRec").textContent = d.stats.active_recordings;
@@ -496,6 +434,9 @@
     document.getElementById("sSize").textContent = d.stats.total_size_human;
     document.getElementById("chCount").textContent = d.stats.total_channels;
     document.getElementById("recTotalSize").textContent = d.stats.total_size_human;
+
+    // Show/hide bulk buttons
+    document.getElementById("bulkBtns").style.display = d.channels.length > 0 ? "" : "none";
 
     // Disk
     document.getElementById("diskUsed").textContent = d.disk.used_human;
@@ -568,9 +509,6 @@
             <span class="rec-meta">${f.size_human} &middot; ${f.modified}</span>
           </div>
           <div class="rec-actions">
-            <div class="rec-btn" title="Anteprima" onclick="openVideo('${esc(f.name)}')">
-              <i class="bi bi-play-circle"></i>
-            </div>
             <div class="rec-btn">
               <a href="/recordings/${encodeURIComponent(f.name)}" download title="Scarica"><i class="bi bi-download"></i></a>
             </div>
@@ -588,16 +526,14 @@
     const f = document.createElement("form");
     f.method = "post"; f.style.display = "none";
     f.innerHTML = `<input name="channel" value="${name}"><input name="action" value="${action}">`;
-    document.body.appendChild(f);
-    f.submit();
+    document.body.appendChild(f); f.submit();
   };
 
   window.setQuality = function(name, quality) {
     const f = document.createElement("form");
     f.method = "post"; f.style.display = "none";
     f.innerHTML = `<input name="channel" value="${name}"><input name="action" value="set_quality"><input name="quality" value="${quality}">`;
-    document.body.appendChild(f);
-    f.submit();
+    document.body.appendChild(f); f.submit();
   };
 
   window.confirmRemoveCh = function(name) {
@@ -616,43 +552,17 @@
     document.getElementById(id).classList.remove("open");
   };
 
-  // ── Video player ──
-  window.openVideo = function(name) {
-    const player = document.getElementById("videoPlayer");
-    document.getElementById("videoTitle").textContent = name;
-    player.src = `/preview/${encodeURIComponent(name)}`;
-    document.getElementById("videoBackdrop").classList.add("open");
-    player.play().catch(() => {});
-  };
-
-  window.closeVideoPlayer = function() {
-    const player = document.getElementById("videoPlayer");
-    player.pause();
-    player.src = "";
-    document.getElementById("videoBackdrop").classList.remove("open");
-  };
-
-  window.closeVideo = function(e) {
-    if (e.target === document.getElementById("videoBackdrop")) closeVideoPlayer();
-  };
-
   // ESC to close modals
   document.addEventListener("keydown", e => {
-    if (e.key === "Escape") {
-      closeVideoPlayer();
-      closeConfirm("confirmRemove");
-      closeConfirm("confirmDelete");
-    }
+    if (e.key === "Escape") { closeConfirm("confirmRemove"); closeConfirm("confirmDelete"); }
   });
-
-  // Close confirm on backdrop click
   ["confirmRemove", "confirmDelete"].forEach(id => {
     document.getElementById(id).addEventListener("click", e => {
       if (e.target.id === id) closeConfirm(id);
     });
   });
 
-  // ── Refresh loop ──
+  // ── Refresh ──
   async function refresh() {
     const dot = document.getElementById("refreshDot");
     try {
@@ -660,9 +570,7 @@
       if (!r.ok) throw new Error();
       render(await r.json());
       dot.classList.remove("stale");
-    } catch {
-      dot.classList.add("stale");
-    }
+    } catch { dot.classList.add("stale"); }
   }
 
   refresh();
