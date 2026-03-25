@@ -1,35 +1,39 @@
-# Usa immagine slim di Python
-FROM python:3.11-slim
+# ── Build stage: streamlink is big, keep final image small ──
+FROM python:3.12-slim AS base
 
-# Imposta la directory di lavoro
 WORKDIR /app
 
-# Installa dipendenze di sistema (solo quelle necessarie)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# System deps (ffmpeg for streamlink, tini for PID 1)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg tini \
+ && rm -rf /var/lib/apt/lists/*
 
-# Copia requirements e installa dipendenze Python + streamlink
+# Python deps
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt streamlink
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia il resto del progetto
-COPY . .
+# App code
+COPY app.py .
+COPY templates/ templates/
 
-# Variabili d'ambiente
-ENV CHANNELS_FILE=/app/channels.json \
-    RECORDINGS_DIR=/app/recordings \
+# Recordings volume
+RUN mkdir -p /data/recordings
+
+# ── Runtime config ──
+ENV CHANNELS_FILE=/data/channels.json \
+    RECORDINGS_DIR=/data/recordings \
     STREAM_QUALITY=best \
     CHECK_INTERVAL=60 \
     PORT=5000 \
-    MAX_FILE_SIZE=1932735283
+    MAX_FILE_SIZE=1932735283 \
+    LOG_LEVEL=INFO
 
-# Crea cartella recordings
-RUN mkdir -p /app/recordings
-
-# Espone la porta
 EXPOSE 5000
 
-# Avvia l'app
-CMD ["python", "app.py"]
+VOLUME ["/data"]
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')" || exit 1
+
+ENTRYPOINT ["tini", "--"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "--timeout", "120", "app:app"]

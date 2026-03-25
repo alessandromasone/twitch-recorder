@@ -1,50 +1,28 @@
-# ============================
 # Python
-# ============================
 __pycache__/
 *.py[cod]
 *.pyo
-*.pyd
-*.so
-*.egg
 *.egg-info/
-*.log
-*.sqlite3
-.env
 venv/
 .venv/
-env/
-ENV/
 
-# ============================
-# Flask / Cache
-# ============================
-instance/
-*.db
-*.sqlite
-*.pyc
-.DS_Store
-
-# ============================
-# IDE / Editor
-# ============================
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# ============================
-# App specifici
-# ============================
+# App data
 channels.json
 recordings/
 *.ts
 *.mp4
 *.mkv
+*.log
 
-# ============================
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
 # Docker
-# ============================
-*.pid
-*.tar
 docker-compose.override.yml

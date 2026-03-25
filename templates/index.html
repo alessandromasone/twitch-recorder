@@ -1,285 +1,433 @@
 <!doctype html>
-<html lang="it" data-bs-theme="light">
-
+<html lang="it" data-bs-theme="dark">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="icon" type="image/x-icon" href="https://icons.getbootstrap.com/assets/icons/camera-video-fill.svg">
-    <title>Twitch Recorder</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-    <style>
-  .recordings-list {
-      max-height: 400px; /* puoi regolare, es. 50vh per percentuale di schermo */
-      overflow-y: auto;
-  }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Twitch Recorder</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📹</text></svg>">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <style>
+    :root {
+      --accent: #9146ff;
+      --accent-hover: #772ce8;
+      --rec-pulse: #e91916;
+    }
 
+    body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+
+    /* ── Stats cards ── */
+    .stat-card {
+      border: none;
+      border-radius: 12px;
+      transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .stat-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,.15); }
+    .stat-icon {
+      width: 44px; height: 44px;
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.25rem;
+    }
+    .stat-value { font-size: 1.5rem; font-weight: 700; line-height: 1.1; }
+    .stat-label { font-size: .78rem; opacity: .65; text-transform: uppercase; letter-spacing: .04em; }
+
+    /* ── Disk bar ── */
+    .disk-bar-bg {
+      height: 8px; border-radius: 4px;
+      background: var(--bs-tertiary-bg);
+      overflow: hidden;
+    }
+    .disk-bar-fill {
+      height: 100%; border-radius: 4px;
+      transition: width .6s ease;
+    }
+
+    /* ── Recording pulse ── */
+    @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+    .rec-dot {
+      display: inline-block; width: 8px; height: 8px;
+      border-radius: 50%; background: var(--rec-pulse);
+      animation: pulse-dot 1.4s ease infinite;
+    }
+    .rec-dot-green { background: #198754; }
+
+    /* ── Table ── */
+    .channels-table th { font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; opacity: .6; font-weight: 600; }
+    .channels-table td { vertical-align: middle; }
+    .channel-link { text-decoration: none; color: var(--accent); font-weight: 600; }
+    .channel-link:hover { text-decoration: underline; }
+
+    /* ── Recordings list ── */
+    .rec-list { max-height: 420px; overflow-y: auto; }
+    .rec-list::-webkit-scrollbar { width: 6px; }
+    .rec-list::-webkit-scrollbar-thumb { background: var(--bs-border-color); border-radius: 3px; }
+
+    /* ── Uptime badge ── */
+    .uptime-badge { font-variant-numeric: tabular-nums; font-size: .75rem; }
+
+    /* ── Refresh indicator ── */
+    .refresh-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      display: inline-block; margin-right: 4px;
+      background: #198754;
+      transition: background .3s;
+    }
+    .refresh-dot.stale { background: #dc3545; }
+
+    /* ── Accent overrides ── */
+    .btn-accent { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn-accent:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+
+    /* ── Smooth transitions for data updates ── */
+    .fade-update { transition: opacity .2s ease; }
+    .fade-update.updating { opacity: .5; }
+  </style>
 </head>
-
 <body>
-    <div class="container py-3">
 
-        <!-- Header -->
-        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
-            <h1 class="mb-0"><i class="bi bi-camera-video-fill me-2"></i>Twitch Recorder</h1>
-            <div class="d-flex align-items-center gap-3">
-                <span class="text-muted small"><i class="bi bi-hdd me-1"></i>Spazio libero: {{ free_space }}</span>
-                <button id="themeToggle" class="btn btn-outline-secondary btn-sm" title="Toggle tema">
-                    <i class="bi bi-brightness-high"></i>
-                </button>
-            </div>
-        </div>
+<div class="container-fluid py-3 px-3 px-lg-4" style="max-width:1400px; margin:auto;">
 
-        <!-- Toast container -->
-        <div class="position-fixed top-0 end-0 p-3" style="z-index: 1100">
-            <div id="toastContainer"></div>
-        </div>
-
-        <!-- Aggiungi canale -->
-        <div class="card shadow-sm mb-4">
-            <div class="card-body">
-                <form method="post" class="row g-2 align-items-center">
-                    <div class="col-12 col-md-8">
-                        <input type="text" name="channel" class="form-control"
-                            placeholder="Nome canale Twitch (es. ninja)" required>
-                    </div>
-                    <div class="col-12 col-md-4 text-md-end">
-                        <button name="action" value="add" class="btn btn-primary w-100 w-md-auto">
-                            <i class="bi bi-plus-circle me-1"></i><span class="d-none d-md-inline">Aggiungi e
-                                registra</span>
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <div class="row g-4">
-
-            <!-- Canali -->
-            <div class="col-12 col-lg-7">
-                <div class="card shadow-sm">
-                    <div class="card-header"><i class="bi bi-collection-play me-2"></i>Canali</div>
-                    <div class="table-responsive">
-                        <table class="table table-striped table-hover align-middle mb-0">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>Canale</th>
-                                    <th>Online</th>
-                                    <th>Richiesta</th>
-                                    <!--<th>Stato effettivo</th>-->
-                                    <th class="text-end">Azioni</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for ch in channels %}
-                                <tr>
-                                    <!-- Nome canale -->
-                                    <td class="fw-semibold">
-                                        {{ ch.name }}
-                                        <a href="https://twitch.tv/{{ ch.name }}" target="_blank"
-                                            class="ms-1 text-decoration-none">
-                                            <i class="bi bi-box-arrow-up-right"></i>
-                                        </a>
-                                    </td>
-
-                                    <!-- Online/offline -->
-                                    <td>
-                                        {% if ch.online %}
-                                        <span class="badge bg-success"><i class="bi bi-broadcast me-1"></i>Online</span>
-                                        {% else %}
-                                        <span class="badge bg-secondary"><i
-                                                class="bi bi-slash-circle me-1"></i>Offline</span>
-                                        {% endif %}
-                                    </td>
-
-                                    <!-- Richiesta utente -->
-                                    <td>
-                                        {% if ch.is_recording %}
-                                        <span class="badge bg-primary"><i
-                                                class="bi bi-record-circle me-1"></i>Registra</span>
-                                        {% else %}
-                                        <span class="badge bg-warning text-dark"><i
-                                                class="bi bi-pause-circle me-1"></i>Pausa</span>
-                                        {% endif %}
-                                    </td>
-
-                                    <!-- Stato effettivo -->
-                                    <!--
-    <td>
-      {% if recorders.get(ch.name) and recorders[ch.name].is_recording %}
-      <span class="badge bg-success"><i class="bi bi-circle-fill me-1"></i>Registrazione</span>
-      {% else %}
-      <span class="badge bg-secondary"><i class="bi bi-hourglass-split me-1"></i>In attesa</span>
-      {% endif %}
-    </td>
-    -->
-
-                                    <!-- Azioni -->
-                                    <td class="text-end">
-                                        <form method="post" class="d-inline">
-                                            <input type="hidden" name="channel" value="{{ ch.name }}">
-                                            {% if ch.is_recording %}
-                                            <button class="btn btn-sm btn-outline-warning" name="action" value="pause">
-                                                <i class="bi bi-pause-fill"></i><span
-                                                    class="d-none d-md-inline ms-1">Pausa</span>
-                                            </button>
-                                            {% else %}
-                                            <button class="btn btn-sm btn-outline-success" name="action" value="resume">
-                                                <i class="bi bi-play-fill"></i><span
-                                                    class="d-none d-md-inline ms-1">Riprendi</span>
-                                            </button>
-                                            {% endif %}
-                                        </form>
-
-                                        <!-- Rimuovi -->
-                                        <button class="btn btn-sm btn-outline-danger ms-1" data-bs-toggle="modal"
-                                            data-bs-target="#removeModal" data-channel="{{ ch.name }}">
-                                            <i class="bi bi-trash-fill"></i><span
-                                                class="d-none d-md-inline ms-1">Rimuovi</span>
-                                        </button>
-                                    </td>
-                                </tr>
-                                {% else %}
-                                <tr>
-                                    <td colspan="5" class="text-center py-3">Nessun canale aggiunto</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-<!-- Registrazioni -->
-<div class="col-12 col-lg-5">
-    <div class="card shadow-sm">
-        <div class="card-header"><i class="bi bi-folder2-open me-2"></i>Registrazioni</div>
-        <ul class="list-group list-group-flush recordings-list">
-            {% for file in recordings %}
-            <li class="list-group-item d-flex justify-content-between align-items-center">
-                <span class="text-truncate" style="max-width: 65%;">{{ file }}</span>
-                <div class="btn-group btn-group-sm" role="group">
-                    <a href="/recordings/{{ file }}" class="btn btn-outline-primary" download><i
-                            class="bi bi-download"></i></a>
-                    <a href="/recordings/{{ file }}" class="btn btn-outline-secondary" target="_blank"><i
-                            class="bi bi-box-arrow-up-right"></i></a>
-                    <button class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteFileModal"
-                        data-filename="{{ file }}">
-                        <i class="bi bi-trash"></i></button>
-                </div>
-            </li>
-            {% else %}
-            <li class="list-group-item text-center py-3">Nessuna registrazione</li>
-            {% endfor %}
-        </ul>
+  <!-- ═══ Header ═══ -->
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-2">
+      <i class="bi bi-camera-video-fill fs-3" style="color:var(--accent)"></i>
+      <h4 class="mb-0 fw-bold">Twitch Recorder</h4>
     </div>
+    <div class="d-flex align-items-center gap-3">
+      <small class="text-muted"><span class="refresh-dot" id="refreshDot"></span>Auto-refresh <span id="countdown"></span></small>
+      <button id="themeToggle" class="btn btn-outline-secondary btn-sm" title="Tema">
+        <i class="bi bi-circle-half"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- ═══ Stats row ═══ -->
+  <div class="row g-2 mb-3" id="statsRow">
+    <div class="col-6 col-md-3">
+      <div class="card stat-card h-100">
+        <div class="card-body p-2 p-md-3 d-flex align-items-center gap-2">
+          <div class="stat-icon bg-primary bg-opacity-10 text-primary"><i class="bi bi-collection-play"></i></div>
+          <div>
+            <div class="stat-value" id="statChannels">—</div>
+            <div class="stat-label">Canali</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card stat-card h-100">
+        <div class="card-body p-2 p-md-3 d-flex align-items-center gap-2">
+          <div class="stat-icon bg-success bg-opacity-10 text-success"><i class="bi bi-broadcast"></i></div>
+          <div>
+            <div class="stat-value" id="statOnline">—</div>
+            <div class="stat-label">Online</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card stat-card h-100">
+        <div class="card-body p-2 p-md-3 d-flex align-items-center gap-2">
+          <div class="stat-icon bg-danger bg-opacity-10 text-danger"><i class="bi bi-record-circle"></i></div>
+          <div>
+            <div class="stat-value" id="statRecording">—</div>
+            <div class="stat-label">Registrando</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card stat-card h-100">
+        <div class="card-body p-2 p-md-3 d-flex align-items-center gap-2">
+          <div class="stat-icon bg-info bg-opacity-10 text-info"><i class="bi bi-folder2-open"></i></div>
+          <div>
+            <div class="stat-value" id="statFiles">—</div>
+            <div class="stat-label">File salvati</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Disk usage bar ═══ -->
+  <div class="card mb-3 border-0 bg-body-tertiary" style="border-radius:10px">
+    <div class="card-body py-2 px-3">
+      <div class="d-flex justify-content-between align-items-center mb-1">
+        <small class="fw-semibold"><i class="bi bi-hdd me-1"></i>Spazio disco</small>
+        <small class="text-muted"><span id="diskUsed">—</span> / <span id="diskTotal">—</span> &middot; <strong id="diskFree">—</strong> liberi</small>
+      </div>
+      <div class="disk-bar-bg">
+        <div class="disk-bar-fill" id="diskBar" style="width:0%; background: var(--accent);"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Add channel ═══ -->
+  <div class="card border-0 shadow-sm mb-3" style="border-radius:10px;">
+    <div class="card-body py-2 px-3">
+      <form method="post" class="row g-2 align-items-center">
+        <div class="col">
+          <input type="text" name="channel" class="form-control" placeholder="Nome canale o URL Twitch…" required autocomplete="off">
+        </div>
+        <div class="col-auto">
+          <button name="action" value="add" class="btn btn-accent">
+            <i class="bi bi-plus-lg me-1"></i><span class="d-none d-sm-inline">Aggiungi</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ═══ Toast container ═══ -->
+  <div class="position-fixed top-0 end-0 p-3" style="z-index:1100">
+    <div id="toastContainer"></div>
+  </div>
+
+  <div class="row g-3">
+
+    <!-- ═══ Channels table ═══ -->
+    <div class="col-12 col-lg-7">
+      <div class="card border-0 shadow-sm" style="border-radius:10px">
+        <div class="card-header bg-transparent border-0 fw-semibold py-2 px-3">
+          <i class="bi bi-people-fill me-1" style="color:var(--accent)"></i>Canali monitorati
+        </div>
+        <div class="table-responsive">
+          <table class="table channels-table mb-0">
+            <thead>
+              <tr>
+                <th class="ps-3">Canale</th>
+                <th>Stato</th>
+                <th>Registrazione</th>
+                <th class="text-end pe-3">Azioni</th>
+              </tr>
+            </thead>
+            <tbody id="channelsBody">
+              <tr><td colspan="4" class="text-center py-4 text-muted">Caricamento…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Recordings ═══ -->
+    <div class="col-12 col-lg-5">
+      <div class="card border-0 shadow-sm" style="border-radius:10px">
+        <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2 px-3">
+          <span class="fw-semibold"><i class="bi bi-film me-1" style="color:var(--accent)"></i>Registrazioni</span>
+          <small class="text-muted" id="recTotalSize"></small>
+        </div>
+        <ul class="list-group list-group-flush rec-list" id="recordingsList">
+          <li class="list-group-item text-center py-4 text-muted">Caricamento…</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
 </div>
 
-
+<!-- ═══ Modal rimozione canale ═══ -->
+<div class="modal fade" id="removeModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content" style="border-radius:12px">
+      <form method="post">
+        <div class="modal-body text-center py-4">
+          <i class="bi bi-trash3 fs-1 text-danger d-block mb-2"></i>
+          <p>Rimuovere <strong id="removeChannelName"></strong>?</p>
+          <input type="hidden" name="channel" id="removeChannelInput">
+          <input type="hidden" name="action" value="remove">
+          <div class="d-flex gap-2 justify-content-center">
+            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Annulla</button>
+            <button type="submit" class="btn btn-danger btn-sm">Rimuovi</button>
+          </div>
         </div>
+      </form>
     </div>
+  </div>
+</div>
 
-    <!-- Modal conferma rimozione -->
-    <div class="modal fade" id="removeModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <form method="post">
-                    <div class="modal-header">
-                        <h5 class="modal-title"><i class="bi bi-trash-fill me-2"></i>Conferma rimozione</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body">
-                        <p>Sei sicuro di voler rimuovere il canale <strong id="removeChannelName"></strong>?</p>
-                        <input type="hidden" name="channel" id="removeChannelInput">
-                        <input type="hidden" name="action" value="remove">
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
-                        <button type="submit" class="btn btn-danger">Rimuovi</button>
-                    </div>
-                </form>
-            </div>
+<!-- ═══ Modal eliminazione file ═══ -->
+<div class="modal fade" id="deleteFileModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content" style="border-radius:12px">
+      <form method="post" action="/delete_recording">
+        <div class="modal-body text-center py-4">
+          <i class="bi bi-trash3 fs-1 text-danger d-block mb-2"></i>
+          <p>Eliminare <strong id="deleteFileName" class="text-break"></strong>?</p>
+          <p class="text-danger small mb-3">Azione irreversibile.</p>
+          <input type="hidden" name="filename" id="deleteFileInput">
+          <div class="d-flex gap-2 justify-content-center">
+            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Annulla</button>
+            <button type="submit" class="btn btn-danger btn-sm">Elimina</button>
+          </div>
         </div>
+      </form>
     </div>
+  </div>
+</div>
 
-    <!-- Modal conferma eliminazione file -->
-    <div class="modal fade" id="deleteFileModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <form method="post" action="{{ url_for('delete_recording') }}">
-                    <div class="modal-header">
-                        <h5 class="modal-title"><i class="bi bi-trash-fill me-2"></i>Elimina registrazione</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body">
-                        <p>Sei sicuro di voler eliminare il file <strong id="deleteFileName"></strong>?</p>
-                        <p class="text-danger small mb-0">Questa azione è irreversibile.</p>
-                        <input type="hidden" name="filename" id="deleteFileInput">
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
-                        <button type="submit" class="btn btn-danger">Elimina definitivamente</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(() => {
+  "use strict";
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Toggle dark/light mode
-        const themeToggle = document.getElementById('themeToggle');
-        const htmlEl = document.documentElement;
-        if (localStorage.getItem('theme')) htmlEl.setAttribute('data-bs-theme', localStorage.getItem('theme'));
-        themeToggle.addEventListener('click', () => {
-            let next = htmlEl.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark';
-            htmlEl.setAttribute('data-bs-theme', next);
-            localStorage.setItem('theme', next);
-        });
+  const REFRESH_INTERVAL = 5; // secondi
+  let countdown = REFRESH_INTERVAL;
+  let lastData = null;
 
-        // Modal rimozione
-        const removeModal = document.getElementById('removeModal');
-        removeModal.addEventListener('show.bs.modal', event => {
-            const button = event.relatedTarget;
-            const channel = button.getAttribute('data-channel');
-            document.getElementById('removeChannelName').innerText = channel;
-            document.getElementById('removeChannelInput').value = channel;
-        });
+  // ── Theme toggle ──
+  const html = document.documentElement;
+  const saved = localStorage.getItem("theme");
+  if (saved) html.setAttribute("data-bs-theme", saved);
+  document.getElementById("themeToggle").addEventListener("click", () => {
+    const next = html.getAttribute("data-bs-theme") === "dark" ? "light" : "dark";
+    html.setAttribute("data-bs-theme", next);
+    localStorage.setItem("theme", next);
+  });
 
-        // Modal eliminazione file
-        const deleteFileModal = document.getElementById('deleteFileModal');
-        deleteFileModal.addEventListener('show.bs.modal', event => {
-            const button = event.relatedTarget;
-            const filename = button.getAttribute('data-filename');
-            document.getElementById('deleteFileName').innerText = filename;
-            document.getElementById('deleteFileInput').value = filename;
-        });
+  // ── Flash toasts (from server-side) ──
+  {% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+  document.addEventListener("DOMContentLoaded", () => {
+    const tc = document.getElementById("toastContainer");
+    {% for cat, msg in messages %}
+    const el = document.createElement("div");
+    el.className = "toast align-items-center text-bg-{{ cat }} border-0";
+    el.setAttribute("role", "alert");
+    el.innerHTML = `<div class="d-flex"><div class="toast-body">{{ msg }}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>`;
+    tc.appendChild(el);
+    new bootstrap.Toast(el, { delay: 3500 }).show();
+    {% endfor %}
+  });
+  {% endif %}
+  {% endwith %}
 
-        // Mostra toast dai messaggi flash
-        {% with messages = get_flashed_messages(with_categories = true) %}
-        {% if messages %}
-        document.addEventListener("DOMContentLoaded", () => {
-            const toastContainer = document.getElementById('toastContainer');
-            {% for category, message in messages %}
-            const toastEl = document.createElement('div');
-            toastEl.className = `toast align-items-center text-bg-{{ category }} border-0`;
-            toastEl.setAttribute('role', 'alert');
-            toastEl.setAttribute('aria-live', 'assertive');
-            toastEl.setAttribute('aria-atomic', 'true');
-            toastEl.innerHTML = `
-      <div class="d-flex">
-        <div class="toast-body">{{ message }}</div>
-        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
-      </div>`;
-            toastContainer.appendChild(toastEl);
-            new bootstrap.Toast(toastEl, { delay: 4000 }).show();
-            {% endfor %}
-        });
-        {% endif %}
-        {% endwith %}
-    </script>
+  // ── Helpers ──
+  function fmtUptime(sec) {
+    if (!sec || sec <= 0) return "";
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  }
+
+  // ── Render ──
+  function render(data) {
+    // Stats
+    document.getElementById("statChannels").textContent = data.stats.total_channels;
+    document.getElementById("statOnline").textContent = data.stats.online_channels;
+    document.getElementById("statRecording").textContent = data.stats.active_recordings;
+    document.getElementById("statFiles").textContent = data.stats.total_files;
+
+    // Disk
+    document.getElementById("diskUsed").textContent = data.disk.used_human;
+    document.getElementById("diskTotal").textContent = data.disk.total_human;
+    document.getElementById("diskFree").textContent = data.disk.free_human;
+    const bar = document.getElementById("diskBar");
+    bar.style.width = data.disk.used_pct + "%";
+    bar.style.background = data.disk.used_pct > 90 ? "#dc3545" : data.disk.used_pct > 75 ? "#ffc107" : "var(--accent)";
+
+    // Channels
+    const tbody = document.getElementById("channelsBody");
+    if (data.channels.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-muted">Nessun canale — aggiungine uno sopra!</td></tr>`;
+    } else {
+      tbody.innerHTML = data.channels.map(ch => {
+        const statusBadge = ch.online
+          ? `<span class="rec-dot rec-dot-green me-1"></span><span class="badge bg-success bg-opacity-10 text-success">Online</span>`
+          : `<span class="badge bg-secondary bg-opacity-10 text-secondary">Offline</span>`;
+
+        let recBadge;
+        if (ch.actually_recording) {
+          recBadge = `<span class="rec-dot me-1"></span><span class="badge bg-danger bg-opacity-10 text-danger">REC</span>`;
+          if (ch.uptime) recBadge += ` <span class="badge bg-body-tertiary text-muted uptime-badge">${fmtUptime(ch.uptime)}</span>`;
+        } else if (ch.is_recording) {
+          recBadge = `<span class="badge bg-warning bg-opacity-10 text-warning">In attesa</span>`;
+        } else {
+          recBadge = `<span class="badge bg-body-tertiary text-muted">Pausa</span>`;
+        }
+
+        const pauseResume = ch.is_recording
+          ? `<button class="btn btn-sm btn-outline-warning" name="action" value="pause"><i class="bi bi-pause-fill"></i></button>`
+          : `<button class="btn btn-sm btn-outline-success" name="action" value="resume"><i class="bi bi-play-fill"></i></button>`;
+
+        return `<tr>
+          <td class="ps-3">
+            <a href="https://twitch.tv/${ch.name}" target="_blank" class="channel-link">${ch.name}</a>
+          </td>
+          <td>${statusBadge}</td>
+          <td>${recBadge}</td>
+          <td class="text-end pe-3">
+            <form method="post" class="d-inline"><input type="hidden" name="channel" value="${ch.name}">${pauseResume}</form>
+            <button class="btn btn-sm btn-outline-danger ms-1" data-bs-toggle="modal" data-bs-target="#removeModal" data-channel="${ch.name}"><i class="bi bi-trash3"></i></button>
+          </td>
+        </tr>`;
+      }).join("");
+    }
+
+    // Recordings
+    const list = document.getElementById("recordingsList");
+    document.getElementById("recTotalSize").textContent = data.stats.total_size_human || "";
+    if (data.recordings.length === 0) {
+      list.innerHTML = `<li class="list-group-item text-center py-4 text-muted">Nessuna registrazione</li>`;
+    } else {
+      list.innerHTML = data.recordings.map(f => `
+        <li class="list-group-item d-flex justify-content-between align-items-center py-2 px-3">
+          <div class="text-truncate me-2" style="max-width:55%">
+            <small class="fw-medium">${f.name}</small><br>
+            <small class="text-muted">${f.size_human} · ${f.modified}</small>
+          </div>
+          <div class="btn-group btn-group-sm">
+            <a href="/recordings/${encodeURIComponent(f.name)}" class="btn btn-outline-primary" download title="Scarica"><i class="bi bi-download"></i></a>
+            <button class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteFileModal" data-filename="${f.name}" title="Elimina"><i class="bi bi-trash3"></i></button>
+          </div>
+        </li>
+      `).join("");
+    }
+  }
+
+  // ── Fetch loop ──
+  async function refresh() {
+    const dot = document.getElementById("refreshDot");
+    try {
+      const resp = await fetch("/api/status");
+      if (!resp.ok) throw new Error(resp.statusText);
+      lastData = await resp.json();
+      render(lastData);
+      dot.classList.remove("stale");
+    } catch (e) {
+      console.error("Refresh error:", e);
+      dot.classList.add("stale");
+    }
+  }
+
+  // Initial load
+  refresh();
+
+  // Countdown + periodic refresh
+  setInterval(() => {
+    countdown--;
+    document.getElementById("countdown").textContent = `(${countdown}s)`;
+    if (countdown <= 0) {
+      countdown = REFRESH_INTERVAL;
+      refresh();
+    }
+  }, 1000);
+
+  // ── Modal data binding ──
+  document.getElementById("removeModal").addEventListener("show.bs.modal", e => {
+    const ch = e.relatedTarget.getAttribute("data-channel");
+    document.getElementById("removeChannelName").textContent = ch;
+    document.getElementById("removeChannelInput").value = ch;
+  });
+  document.getElementById("deleteFileModal").addEventListener("show.bs.modal", e => {
+    const fn = e.relatedTarget.getAttribute("data-filename");
+    document.getElementById("deleteFileName").textContent = fn;
+    document.getElementById("deleteFileInput").value = fn;
+  });
+})();
+</script>
 </body>
-
 </html>

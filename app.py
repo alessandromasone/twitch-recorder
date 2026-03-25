@@ -1,344 +1,470 @@
-from flask import Flask, render_template, request, redirect, url_for, send_from_directory, flash
-import json, os, subprocess, threading, logging, shutil, time, copy, concurrent.futures, signal, sys
-from datetime import datetime
-from dotenv import load_dotenv
-import secrets
+"""
+Twitch Recorder — Backend Flask
+Registra automaticamente stream Twitch quando vanno online.
+"""
 
-# CARICAMENTO CONFIGURAZIONE
-# Carica variabili d'ambiente dal file .env (se presente)
+import json
+import os
+import subprocess
+import threading
+import logging
+import shutil
+import time
+import copy
+import signal
+import sys
+import secrets
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from flask import (
+    Flask, render_template, request, redirect,
+    url_for, send_from_directory, flash, jsonify,
+)
+from dotenv import load_dotenv
+
+# ─── Configurazione ──────────────────────────────────────────────────────────
+
 load_dotenv()
 
+CHANNELS_FILE   = os.getenv("CHANNELS_FILE", "channels.json")
+RECORDINGS_DIR  = os.getenv("RECORDINGS_DIR", "recordings")
+FILE_EXTENSION  = os.getenv("FILE_EXTENSION", ".ts")
+FILENAME_FORMAT = os.getenv("FILENAME_FORMAT", "{name}_{timestamp}{ext}")
+STREAM_QUALITY  = os.getenv("STREAM_QUALITY", "best")
+CHECK_INTERVAL  = int(os.getenv("CHECK_INTERVAL", "60"))
+PORT            = int(os.getenv("PORT", "5000"))
+MAX_FILE_SIZE   = int(os.getenv("MAX_FILE_SIZE", str(int(1.8 * 1024**3))))
+LOG_LEVEL       = os.getenv("LOG_LEVEL", "INFO").upper()
+
+# Video extensions riconosciute (per filtrare .log dalla lista)
+_VIDEO_EXTS = {".ts", ".mp4", ".mkv", ".flv", ".avi", ".mov", ".webm"}
+
+# ─── Logging ──────────────────────────────────────────────────────────────────
+
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="[%(asctime)s] %(levelname)s — %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("twitch-recorder")
+
+# ─── Flask app ────────────────────────────────────────────────────────────────
+
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(32)  # nuova chiave random a ogni avvio
+app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(32))
 
-# --- CONFIGURAZIONE ---
-CHANNELS_FILE   = os.getenv("CHANNELS_FILE", "channels.json")     # File JSON dove vengono salvati i canali
-RECORDINGS_DIR  = os.getenv("RECORDINGS_DIR", "recordings")       # Cartella di destinazione delle registrazioni
-FILE_EXTENSION  = os.getenv("FILE_EXTENSION", ".ts")              # Estensione file video
-FILENAME_FORMAT = os.getenv("FILENAME_FORMAT", "{name}_{timestamp}{ext}")  # Formato del nome file
-STREAM_QUALITY  = os.getenv("STREAM_QUALITY", "best")             # Qualità stream (parametro di streamlink)
-CHECK_INTERVAL  = int(os.getenv("CHECK_INTERVAL", 60))            # Intervallo di monitoraggio canali (secondi)
-PORT            = int(os.getenv("PORT", 5000))                    # Porta del server Flask
-MAX_FILE_SIZE   = float(os.getenv("MAX_FILE_SIZE", 1.8 * 1024 * 1024 * 1024))  # Dimensione massima file (default 1.8GB)
+os.makedirs(RECORDINGS_DIR, exist_ok=True)
 
-# LOGGING
-logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# ─── Helpers ──────────────────────────────────────────────────────────────────
 
-# LOCK GLOBALE PER THREAD SAFETY
-data_lock = threading.Lock()
-
-# PREPARAZIONE CARTELLE
-os.makedirs(RECORDINGS_DIR, exist_ok=True)  # Crea la cartella delle registrazioni se non esiste
-
-# FUNZIONI UTILI
-def generate_filename(channel_name):
-    """Genera un nome file basato sul formato configurato e timestamp corrente."""
+def _generate_filename(channel_name: str) -> str:
     ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     return FILENAME_FORMAT.format(name=channel_name, timestamp=ts, ext=FILE_EXTENSION)
 
-def load_channels():
-    """Carica la lista dei canali dal file JSON."""
+
+def _load_channels() -> list[dict]:
     if os.path.exists(CHANNELS_FILE):
-        with open(CHANNELS_FILE) as f:
-            return json.load(f)
+        try:
+            with open(CHANNELS_FILE, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.error("Impossibile leggere %s: %s", CHANNELS_FILE, exc)
     return []
 
-def save_channels(channels):
-    """Salva la lista dei canali sul file JSON."""
-    with open(CHANNELS_FILE, 'w') as f:
-        json.dump(channels, f, indent=2)
 
-def is_channel_online(channel_name):
-    """Verifica se il canale Twitch è online tramite streamlink."""
+def _save_channels(data: list[dict]) -> None:
+    tmp = CHANNELS_FILE + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+        os.replace(tmp, CHANNELS_FILE)
+    except OSError as exc:
+        logger.error("Impossibile salvare %s: %s", CHANNELS_FILE, exc)
+
+
+def _is_channel_online(channel_name: str) -> bool:
     try:
         result = subprocess.run(
             ["streamlink", f"https://twitch.tv/{channel_name}", "--json"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10
+            capture_output=True, timeout=15,
         )
-        return result.returncode == 0 and b"streams" in result.stdout
+        return result.returncode == 0 and b'"streams"' in result.stdout
     except Exception:
         return False
 
-# CLASSE RECORDER
+
+def _file_info(path: str) -> dict:
+    """Ritorna info su un file di registrazione."""
+    try:
+        stat = os.stat(path)
+        return {
+            "name": os.path.basename(path),
+            "size": stat.st_size,
+            "size_human": _human_size(stat.st_size),
+            "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+        }
+    except OSError:
+        return {"name": os.path.basename(path), "size": 0, "size_human": "—", "modified": "—"}
+
+
+def _human_size(nbytes: int) -> str:
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(nbytes) < 1024:
+            return f"{nbytes:.1f} {unit}"
+        nbytes /= 1024
+    return f"{nbytes:.1f} PB"
+
+
+def _list_recordings() -> list[dict]:
+    """Elenca solo file video dalla cartella recordings."""
+    files = []
+    try:
+        for name in os.listdir(RECORDINGS_DIR):
+            ext = os.path.splitext(name)[1].lower()
+            if ext in _VIDEO_EXTS:
+                files.append(_file_info(os.path.join(RECORDINGS_DIR, name)))
+    except OSError:
+        pass
+    files.sort(key=lambda f: f["name"], reverse=True)
+    return files
+
+
+def _disk_stats() -> dict:
+    total, used, free = shutil.disk_usage(RECORDINGS_DIR)
+    return {
+        "total": total,
+        "used": used,
+        "free": free,
+        "total_human": _human_size(total),
+        "used_human": _human_size(used),
+        "free_human": _human_size(free),
+        "used_pct": round(used / total * 100, 1) if total else 0,
+    }
+
+
+# ─── Recorder ────────────────────────────────────────────────────────────────
+
 class Recorder:
-    """
-    Classe che gestisce la registrazione di un singolo canale Twitch.
-    Si occupa di avviare/fermare streamlink, monitorare il processo e
-    gestire la divisione automatica dei file se troppo grandi.
-    """
-    def __init__(self, channel_name):
+    """Gestisce la registrazione di un singolo canale Twitch."""
+
+    __slots__ = (
+        "channel_name", "process", "output_path",
+        "is_recording", "stop_requested", "_lock", "_thread", "_log_fh",
+        "started_at",
+    )
+
+    def __init__(self, channel_name: str):
         self.channel_name = channel_name
-        self.process = None
-        self.output_path = None
+        self.process: subprocess.Popen | None = None
+        self.output_path: str | None = None
         self.is_recording = False
         self.stop_requested = False
-        self.lock = threading.Lock()
-        self.manager_thread = None
-        self.log_file = None
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._log_fh = None
+        self.started_at: float | None = None
 
-    def start(self):
-        """Avvia la registrazione in background (con gestione riavvii)."""
-        with self.lock:
+    # ── public ──
+
+    def start(self) -> None:
+        with self._lock:
             if self.is_recording:
                 return
             self.stop_requested = False
             self.is_recording = True
-            self.manager_thread = threading.Thread(target=self._recording_manager, daemon=True)
-            self.manager_thread.start()
-            logger.info(f"Avviata registrazione: {self.channel_name}")
+            self.started_at = time.time()
+            self._thread = threading.Thread(
+                target=self._manager_loop, daemon=True, name=f"rec-{self.channel_name}",
+            )
+            self._thread.start()
+            logger.info("▶ Avviata registrazione: %s", self.channel_name)
 
-    def _recording_manager(self):
-        """Gestisce il ciclo di vita della registrazione, riavviando in caso di errori o split."""
-        error_start_time = None
+    def stop(self) -> None:
+        with self._lock:
+            if not self.is_recording:
+                return
+            self.stop_requested = True
+            proc = self.process
+        if proc:
+            try:
+                proc.terminate()
+            except OSError:
+                pass
+        logger.info("⏹ Stop richiesto: %s", self.channel_name)
+
+    @property
+    def uptime(self) -> float:
+        if self.started_at and self.is_recording:
+            return time.time() - self.started_at
+        return 0.0
+
+    # ── private ──
+
+    def _manager_loop(self) -> None:
+        error_start: float | None = None
 
         while not self.stop_requested:
-            self.output_path = os.path.join(RECORDINGS_DIR, generate_filename(self.channel_name))
+            self.output_path = os.path.join(
+                RECORDINGS_DIR, _generate_filename(self.channel_name),
+            )
             cmd = [
                 "streamlink",
                 "--twitch-disable-ads",
                 f"https://twitch.tv/{self.channel_name}",
                 STREAM_QUALITY,
-                "-o", self.output_path
+                "-o", self.output_path,
             ]
-            
-            log_path = os.path.join(RECORDINGS_DIR, f"{self.channel_name}.log")
-            process_start_time = time.time()
+            log_path = os.path.join(RECORDINGS_DIR, f".{self.channel_name}.log")
+            t0 = time.time()
 
             try:
-                self.log_file = open(log_path, "a")
-                self.process = subprocess.Popen(cmd, stdout=self.log_file, stderr=self.log_file)
-                
-                # Monitor dimensione file dedicato a questo processo
-                size_monitor = threading.Thread(target=self._monitor_file_size, args=(self.process, self.output_path), daemon=True)
-                size_monitor.start()
-
+                self._log_fh = open(log_path, "a", encoding="utf-8")
+                self.process = subprocess.Popen(
+                    cmd, stdout=self._log_fh, stderr=self._log_fh,
+                )
+                # Thread dedicato al monitoraggio dimensione
+                threading.Thread(
+                    target=self._watch_size,
+                    args=(self.process, self.output_path),
+                    daemon=True,
+                ).start()
                 self.process.wait()
-            except Exception as e:
-                logger.error(f"Errore streamlink {self.channel_name}: {e}")
+            except Exception as exc:
+                logger.error("Errore streamlink %s: %s", self.channel_name, exc)
             finally:
-                if self.log_file:
-                    self.log_file.close()
-                    self.log_file = None
+                if self._log_fh:
+                    self._log_fh.close()
+                    self._log_fh = None
                 self.process = None
 
             if self.stop_requested:
                 break
 
-            # Logica riavvio / tolleranza errori
-            duration = time.time() - process_start_time
-            if duration < 20:
-                # Se il processo è durato poco, consideriamo errore
-                if error_start_time is None:
-                    error_start_time = time.time()
-                
-                if time.time() - error_start_time > 180:
-                    logger.error(f"Superata tolleranza errori (180s) per {self.channel_name}. Stop.")
+            elapsed = time.time() - t0
+            if elapsed < 20:
+                if error_start is None:
+                    error_start = time.time()
+                if time.time() - error_start > 180:
+                    logger.error(
+                        "Superata tolleranza errori (180 s) per %s — stop.",
+                        self.channel_name,
+                    )
                     break
-                
-                logger.warning(f"Errore/Crash {self.channel_name}. Riavvio tra 5s...")
+                logger.warning("Crash %s — riavvio tra 5 s…", self.channel_name)
                 time.sleep(5)
             else:
-                # Reset timer se il processo è durato a lungo
-                error_start_time = None
-                logger.info(f"Processo terminato (split o fine). Riavvio immediato {self.channel_name}.")
+                error_start = None
+                logger.info("Split / fine per %s — riavvio immediato.", self.channel_name)
                 time.sleep(1)
 
-        with self.lock:
+        with self._lock:
             self.is_recording = False
+            self.started_at = None
 
-    def _monitor_file_size(self, current_process, path):
-        """Controlla dimensione file e termina il processo se necessario."""
-        # Se MAX_FILE_SIZE è <= 0, il monitoraggio è disabilitato
+    def _watch_size(self, proc: subprocess.Popen, path: str) -> None:
         if MAX_FILE_SIZE <= 0:
             return
-
         while not self.stop_requested:
-            if current_process.poll() is not None:
-                break
-            try:
-                if os.path.exists(path):
-                    size = os.path.getsize(path)
-                    if size >= MAX_FILE_SIZE:
-                        logger.info(f"File {path} pieno. Split...")
-                        current_process.terminate()
-                        break
-            except Exception as e:
-                pass
-            time.sleep(5)  # controlla ogni 5 secondi
-
-    def stop(self):
-        """Ferma la registrazione in corso."""
-        with self.lock:
-            if not self.is_recording:
+            if proc.poll() is not None:
                 return
-            self.stop_requested = True
-            if self.process:
-                try:
-                    self.process.terminate()
-                except Exception:
-                    pass
-            logger.info(f"Stop richiesto: {self.channel_name}")
+            try:
+                if os.path.exists(path) and os.path.getsize(path) >= MAX_FILE_SIZE:
+                    logger.info("File %s ha raggiunto il limite — split.", path)
+                    proc.terminate()
+                    return
+            except OSError:
+                pass
+            time.sleep(5)
 
-# GLOBAL: CANALI E RECORDER
-channels  = load_channels()  # Carica canali dal file JSON
-recorders = {ch['name']: Recorder(ch['name']) for ch in channels}  # Crea un Recorder per ogni canale
 
-# THREAD MONITOR
-def monitor_channels():
-    """
-    Thread che ciclicamente controlla lo stato dei canali:
-    - Avvia la registrazione se online e attivata
-    - Ferma la registrazione se offline o disattivata
-    """
+# ─── Stato globale ────────────────────────────────────────────────────────────
+
+_lock = threading.Lock()
+_channels: list[dict] = _load_channels()
+_recorders: dict[str, Recorder] = {ch["name"]: Recorder(ch["name"]) for ch in _channels}
+
+# Executor riusabile per i check online (evita di ricreare pool a ogni ciclo)
+_online_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="online-check")
+
+
+def _monitor_loop() -> None:
+    """Thread che controlla periodicamente i canali e avvia/ferma le registrazioni."""
     while True:
         try:
-            # Copia la lista per non bloccare il lock durante il check online (che è lento)
-            with data_lock:
-                channels_copy = copy.deepcopy(channels)
+            with _lock:
+                snapshot = copy.deepcopy(_channels)
 
-            # Check online status (senza lock)
-            online_status = {}
-            # Controllo parallelo per velocizzare il monitoraggio (max 5 check contemporanei)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                future_to_name = {executor.submit(is_channel_online, ch['name']): ch['name'] for ch in channels_copy}
-                for future in concurrent.futures.as_completed(future_to_name):
-                    name = future_to_name[future]
-                    # is_channel_online gestisce già le eccezioni internamente
-                    online_status[name] = future.result()
+            # Check online in parallelo
+            futures = {
+                _online_pool.submit(_is_channel_online, ch["name"]): ch["name"]
+                for ch in snapshot
+            }
+            online: dict[str, bool] = {}
+            for fut in as_completed(futures):
+                online[futures[fut]] = fut.result()
 
-            # Applica modifiche e gestisci registrazioni (con lock)
-            with data_lock:
-                for ch in channels:
-                    name = ch['name']
-                    # Aggiorna stato online
-                    ch['online'] = online_status.get(name, False)
-                    
-                    rec = recorders.get(name)
-                    if ch.get('is_recording', False):
-                        if ch['online'] and not rec.is_recording:
-                            rec.start()
-                        if not ch['online'] and rec.is_recording:
-                            rec.stop()
-                    else:
-                        if rec.is_recording:
-                            rec.stop()
-                save_channels(channels)
-        except Exception as e:
-            logger.error(f"Errore nel ciclo di monitoraggio: {e}")
-        
+            # Aggiorna stato e gestisci recorder
+            with _lock:
+                for ch in _channels:
+                    name = ch["name"]
+                    ch["online"] = online.get(name, False)
+
+                    rec = _recorders.get(name)
+                    if rec is None:
+                        continue
+
+                    should_record = ch.get("is_recording", False)
+                    if should_record and ch["online"] and not rec.is_recording:
+                        rec.start()
+                    elif (not should_record or not ch["online"]) and rec.is_recording:
+                        rec.stop()
+
+                _save_channels(_channels)
+
+        except Exception as exc:
+            logger.error("Errore nel ciclo di monitoraggio: %s", exc)
+
         time.sleep(CHECK_INTERVAL)
 
-# Avvia il thread in background
-threading.Thread(target=monitor_channels, daemon=True).start()
 
-# ROTTE FLASK
-@app.route('/', methods=['GET', 'POST'])
+# Avvia il thread monitor
+threading.Thread(target=_monitor_loop, daemon=True, name="monitor").start()
+
+
+# ─── Rotte pagina ────────────────────────────────────────────────────────────
+
+@app.route("/", methods=["GET", "POST"])
 def index():
-    """
-    Homepage con:
-    - Lista canali monitorati
-    - Azioni: aggiungi, pausa, riprendi, rimuovi
-    - Elenco registrazioni salvate
-    """
-    global channels
-    if request.method == 'POST':
-        action = request.form.get('action')
-        channel_name = request.form.get('channel', '').strip().lower()
+    global _channels
 
-        # Gestione input URL: estrae il nome canale se viene incollato un link completo
-        if "twitch.tv/" in channel_name:
-            channel_name = channel_name.split("twitch.tv/")[-1].split("/")[0].split("?")[0]
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        raw = request.form.get("channel", "").strip().lower()
 
-        # --- Aggiungi canale ---
-        if action == 'add' and channel_name:
-            with data_lock:
-                if not any(ch['name'] == channel_name for ch in channels):
-                    ch_info = {"name": channel_name, "is_recording": True, "online": False}
-                    channels.append(ch_info)
-                    save_channels(channels)
-                    recorders[channel_name] = Recorder(channel_name)
-                    flash(f"Canale {channel_name} aggiunto e in attesa di registrazione.", "success")
-                else:
+        # Estrai nome canale da URL se necessario
+        if "twitch.tv/" in raw:
+            raw = raw.split("twitch.tv/")[-1].split("/")[0].split("?")[0]
+        channel_name = raw
+
+        if action == "add" and channel_name:
+            with _lock:
+                if any(c["name"] == channel_name for c in _channels):
                     flash("Canale già presente.", "warning")
-
-        # --- Pausa / Riprendi ---
-        elif action in ('pause', 'resume') and channel_name:
-            with data_lock:
-                ch = next((c for c in channels if c['name'] == channel_name), None)
-                if ch is None:
-                    flash("Canale non trovato", "danger")
                 else:
-                    rec = recorders.get(channel_name)
-                    if action == 'pause':
-                        ch['is_recording'] = False
+                    entry = {"name": channel_name, "is_recording": True, "online": False}
+                    _channels.append(entry)
+                    _recorders[channel_name] = Recorder(channel_name)
+                    _save_channels(_channels)
+                    flash(f"Canale {channel_name} aggiunto.", "success")
+
+        elif action in ("pause", "resume") and channel_name:
+            with _lock:
+                ch = next((c for c in _channels if c["name"] == channel_name), None)
+                if ch is None:
+                    flash("Canale non trovato.", "danger")
+                else:
+                    rec = _recorders.get(channel_name)
+                    if action == "pause":
+                        ch["is_recording"] = False
                         if rec and rec.is_recording:
                             rec.stop()
-                        flash(f"Registrazione di {channel_name} messa in pausa.", "info")
-                    else:  # resume
-                        ch['is_recording'] = True
-                        # Il monitor thread lo avvierà al prossimo ciclo se online
-                        flash(f"Registrazione di {channel_name} ripresa (in attesa se offline).", "success")
-                    save_channels(channels)
+                        flash(f"{channel_name} messo in pausa.", "info")
+                    else:
+                        ch["is_recording"] = True
+                        flash(f"{channel_name} ripreso.", "success")
+                    _save_channels(_channels)
 
-        # --- Rimuovi canale ---
-        elif action == 'remove' and channel_name in recorders:
-            with data_lock:
-                recorders[channel_name].stop()
-                del recorders[channel_name]
-                channels = [c for c in channels if c['name'] != channel_name]
-                save_channels(channels)
+        elif action == "remove" and channel_name:
+            with _lock:
+                rec = _recorders.pop(channel_name, None)
+                if rec:
+                    rec.stop()
+                _channels = [c for c in _channels if c["name"] != channel_name]
+                _save_channels(_channels)
                 flash(f"Canale {channel_name} rimosso.", "danger")
 
-        return redirect(url_for('index'))
+        return redirect(url_for("index"))
 
-    # --- Info spazio libero ---
-    total, used, free = shutil.disk_usage(RECORDINGS_DIR)
-    free_space = f"{free // (1024*1024*1024)} GB liberi"
+    # GET
+    return render_template("index.html")
 
-    # --- Lista registrazioni esistenti ---
-    recordings = sorted(os.listdir(RECORDINGS_DIR), reverse=True)
 
-    return render_template('index.html', channels=channels, recorders=recorders,
-                           recordings=recordings, free_space=free_space)
-
-@app.route('/recordings/<path:filename>')
+@app.route("/recordings/<path:filename>")
 def download_recording(filename):
-    """Permette di scaricare le registrazioni dalla cartella RECORDINGS_DIR."""
     return send_from_directory(RECORDINGS_DIR, filename)
 
-@app.route('/delete_recording', methods=['POST'])
-def delete_recording():
-    """Elimina una registrazione specifica."""
-    filename = request.form.get('filename')
-    if filename:
-        # Sicurezza: usa basename per evitare path traversal (es. ../../windows)
-        safe_filename = os.path.basename(filename)
-        file_path = os.path.join(RECORDINGS_DIR, safe_filename)
-        
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-                flash(f"File {safe_filename} eliminato con successo.", "success")
-            except Exception as e:
-                logger.error(f"Errore eliminazione file {safe_filename}: {e}")
-                flash(f"Errore durante l'eliminazione: {e}", "danger")
-        else:
-            flash("File non trovato.", "warning")
-            
-    return redirect(url_for('index'))
 
-# GESTIONE CHIUSURA (Graceful Shutdown)
-def signal_handler(sig, frame):
-    logger.info("Ricevuto segnale di stop. Chiusura registrazioni in corso...")
-    # Usa list() per evitare errori se il dizionario cambia durante l'iterazione
-    for name, rec in list(recorders.items()):
+@app.route("/delete_recording", methods=["POST"])
+def delete_recording():
+    filename = request.form.get("filename", "")
+    safe = os.path.basename(filename)
+    path = os.path.join(RECORDINGS_DIR, safe)
+    if os.path.exists(path):
+        try:
+            os.remove(path)
+            flash(f"File {safe} eliminato.", "success")
+        except OSError as exc:
+            flash(f"Errore: {exc}", "danger")
+    else:
+        flash("File non trovato.", "warning")
+    return redirect(url_for("index"))
+
+
+# ─── API JSON (per auto-refresh) ─────────────────────────────────────────────
+
+@app.route("/api/status")
+def api_status():
+    """Endpoint unificato per lo stato completo — usato dall'auto-refresh JS."""
+    with _lock:
+        ch_list = []
+        for ch in _channels:
+            rec = _recorders.get(ch["name"])
+            ch_list.append({
+                "name": ch["name"],
+                "online": ch.get("online", False),
+                "is_recording": ch.get("is_recording", False),
+                "actually_recording": rec.is_recording if rec else False,
+                "uptime": round(rec.uptime) if rec else 0,
+            })
+
+    recordings = _list_recordings()
+    disk = _disk_stats()
+
+    total_rec_size = sum(r["size"] for r in recordings)
+
+    return jsonify({
+        "channels": ch_list,
+        "recordings": recordings,
+        "disk": disk,
+        "stats": {
+            "total_channels": len(ch_list),
+            "online_channels": sum(1 for c in ch_list if c["online"]),
+            "active_recordings": sum(1 for c in ch_list if c["actually_recording"]),
+            "total_files": len(recordings),
+            "total_size": total_rec_size,
+            "total_size_human": _human_size(total_rec_size),
+        },
+    })
+
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok", "uptime": time.time()}), 200
+
+
+# ─── Graceful shutdown ───────────────────────────────────────────────────────
+
+def _shutdown(sig, _frame):
+    logger.info("Ricevuto segnale %s — chiusura…", sig)
+    for rec in list(_recorders.values()):
         if rec.is_recording:
             rec.stop()
+    _online_pool.shutdown(wait=False)
     sys.exit(0)
 
-# AVVIO SERVER
-if __name__ == '__main__':
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    app.run(host='0.0.0.0', port=PORT)
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+    app.run(host="0.0.0.0", port=PORT)
