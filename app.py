@@ -3,6 +3,8 @@ Twitch Recorder — Backend Flask
 Registra automaticamente stream Twitch quando vanno online.
 """
 
+import csv
+import io
 import json
 import os
 import re
@@ -16,8 +18,13 @@ import signal
 import sys
 import secrets
 import mimetypes
+import random
+import queue
+import urllib.request
+import urllib.error
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 from flask import (
     Flask, render_template, request, redirect,
@@ -39,6 +46,22 @@ CHECK_INTERVAL  = int(os.getenv("CHECK_INTERVAL", "60"))
 PORT            = int(os.getenv("PORT", "5000"))
 MAX_FILE_SIZE   = int(os.getenv("MAX_FILE_SIZE", str(int(1.8 * 1024**3))))
 LOG_LEVEL       = os.getenv("LOG_LEVEL", "INFO").upper()
+
+# ── Anti-spam ──
+JITTER_MAX         = int(os.getenv("JITTER_MAX", "10"))
+CHECK_PAUSED_ROOMS = os.getenv("CHECK_PAUSED_ROOMS", "false").lower() in ("1", "true", "yes", "on")
+
+# ── Retry intelligente ──
+RECONNECT_WAIT  = int(os.getenv("RECONNECT_WAIT", "30"))
+RECONNECT_TRIES = int(os.getenv("RECONNECT_TRIES", "3"))
+
+# ── Notifiche ──
+NOTIFY_TYPE     = os.getenv("NOTIFY_TYPE", "").lower()
+NOTIFY_URL      = os.getenv("NOTIFY_URL", "")
+TELEGRAM_TOKEN  = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT   = os.getenv("TELEGRAM_CHAT_ID", "")
+NOTIFY_EVENTS   = set(os.getenv("NOTIFY_EVENTS", "online,offline,rec_start,rec_end").split(","))
+TELEGRAM_PHOTO  = os.getenv("TELEGRAM_NOTIFY_PHOTO", "true").lower() in ("1", "true", "yes", "on")
 
 # Qualità disponibili in ordine decrescente
 QUALITY_OPTIONS = [
@@ -79,6 +102,7 @@ def _load_channels() -> list[dict]:
                 for ch in data:
                     if "quality" not in ch:
                         ch["quality"] = STREAM_QUALITY
+                    ch.pop("online", None)
                 return data
         except (json.JSONDecodeError, OSError) as exc:
             logger.error("Impossibile leggere %s: %s", CHANNELS_FILE, exc)
@@ -96,10 +120,6 @@ def _save_channels(data: list[dict]) -> None:
 
 
 def _resolve_quality(channel_name: str, preferred: str) -> str:
-    """
-    Cerca la qualità preferita; se non disponibile, scala alla migliore
-    disponibile partendo da quella richiesta verso il basso.
-    """
     try:
         result = subprocess.run(
             ["streamlink", f"https://twitch.tv/{channel_name}", "--json"],
@@ -113,7 +133,6 @@ def _resolve_quality(channel_name: str, preferred: str) -> str:
 
         if not available:
             return preferred
-
         if preferred in available:
             return preferred
 
@@ -122,32 +141,34 @@ def _resolve_quality(channel_name: str, preferred: str) -> str:
         except ValueError:
             start_idx = 0
 
-        # Cerca prima verso il basso (qualità inferiori)
         for q in QUALITY_OPTIONS[start_idx:]:
             if q in available:
                 logger.info("%s: %s non disponibile, uso %s", channel_name, preferred, q)
                 return q
-
-        # Poi verso l'alto (qualità superiori)
         for q in reversed(QUALITY_OPTIONS[:start_idx]):
             if q in available:
                 logger.info("%s: %s non disponibile, uso %s (superiore)", channel_name, preferred, q)
                 return q
-
         return "best"
     except Exception:
         return preferred
 
 
-def _is_channel_online(channel_name: str) -> bool:
+def _is_channel_online(channel_name: str) -> tuple[bool, bool]:
+    """Ritorna (is_online, is_certain). is_certain=False su errori/timeout."""
     try:
         result = subprocess.run(
             ["streamlink", f"https://twitch.tv/{channel_name}", "--json"],
             capture_output=True, timeout=15,
         )
-        return result.returncode == 0 and b'"streams"' in result.stdout
-    except Exception:
-        return False
+        is_online = result.returncode == 0 and b'"streams"' in result.stdout
+        return is_online, True
+    except subprocess.TimeoutExpired:
+        logger.warning("⚠ %s — timeout check online", channel_name)
+        return False, False
+    except Exception as exc:
+        logger.warning("⚠ %s — errore check online: %s", channel_name, exc)
+        return False, False
 
 
 def _file_info(path: str) -> dict:
@@ -173,13 +194,34 @@ def _human_size(nbytes: int) -> str:
     return f"{nbytes:.1f} PB"
 
 
+def _fmt_duration(seconds: float) -> str:
+    s = int(seconds)
+    if s >= 3600:
+        return f"{s // 3600}h{(s % 3600) // 60:02d}m"
+    elif s >= 60:
+        return f"{s // 60}m{s % 60:02d}s"
+    return f"{s}s"
+
+
+def _active_file_paths() -> set[str]:
+    return {
+        os.path.abspath(rec.output_path)
+        for rec in _recorders.values()
+        if rec.is_recording and rec.output_path
+    }
+
+
 def _list_recordings() -> list[dict]:
     files = []
+    active = _active_file_paths()
     try:
         for name in os.listdir(RECORDINGS_DIR):
             ext = os.path.splitext(name)[1].lower()
             if ext in _VIDEO_EXTS:
-                files.append(_file_info(os.path.join(RECORDINGS_DIR, name)))
+                full = os.path.join(RECORDINGS_DIR, name)
+                info = _file_info(full)
+                info["in_use"] = os.path.abspath(full) in active
+                files.append(info)
     except OSError:
         pass
     files.sort(key=lambda f: f["modified_ts"], reverse=True)
@@ -197,13 +239,139 @@ def _disk_stats() -> dict:
     }
 
 
+# ─── Notifiche ────────────────────────────────────────────────────────────────
+
+def _send_notification(event: str, channel: str, message: str) -> None:
+    if event not in NOTIFY_EVENTS or not NOTIFY_TYPE:
+        return
+    threading.Thread(target=_do_notify, args=(event, channel, message), daemon=True).start()
+
+
+def _do_notify(event: str, channel: str, message: str) -> None:
+    try:
+        if NOTIFY_TYPE == "discord" and NOTIFY_URL:
+            _notify_discord(channel, message)
+        elif NOTIFY_TYPE == "telegram" and TELEGRAM_TOKEN and TELEGRAM_CHAT:
+            _notify_telegram(event, channel, message)
+        elif NOTIFY_TYPE == "webhook" and NOTIFY_URL:
+            _notify_webhook(event, channel, message)
+    except urllib.error.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read().decode("utf-8", errors="replace")[:500]
+        except Exception:
+            pass
+        logger.error("❌ Notifica %s/%s — HTTP %d: %s | Body: %s",
+                     NOTIFY_TYPE, channel, exc.code, exc.reason, body)
+    except urllib.error.URLError as exc:
+        logger.error("❌ Notifica %s/%s — Errore connessione: %s", NOTIFY_TYPE, channel, exc.reason)
+    except Exception as exc:
+        logger.error("❌ Notifica %s/%s — Errore: %s", NOTIFY_TYPE, channel, exc)
+
+
+def _notify_discord(channel: str, message: str) -> None:
+    payload = json.dumps({
+        "username": "Twitch-Recorder",
+        "embeds": [{
+            "title": f"\U0001f4f9 {channel}",
+            "description": message,
+            "color": 0x9146FF,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "footer": {"text": "Twitch-Recorder"},
+        }],
+    }).encode()
+    req = urllib.request.Request(NOTIFY_URL, data=payload,
+                                headers={"Content-Type": "application/json"}, method="POST")
+    urllib.request.urlopen(req, timeout=10)
+
+
+def _tg_escape_html(text: str) -> str:
+    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+
+def _notify_telegram(event: str, channel: str, message: str) -> None:
+    channel_url = f"https://twitch.tv/{channel}"
+    base_api = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+    safe_ch = _tg_escape_html(channel)
+    link = f'<a href="{channel_url}">{safe_ch}</a>'
+
+    if event == "online":
+        caption = f"{link} — 🟢 Online"
+
+        if TELEGRAM_PHOTO:
+            photo_url = f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{channel}-640x360.jpg"
+            payload = json.dumps({
+                "chat_id": TELEGRAM_CHAT,
+                "photo": photo_url,
+                "caption": caption,
+                "parse_mode": "HTML",
+            }).encode()
+            try:
+                req = urllib.request.Request(f"{base_api}/sendPhoto", data=payload,
+                                            headers={"Content-Type": "application/json"}, method="POST")
+                urllib.request.urlopen(req, timeout=15)
+                return
+            except urllib.error.HTTPError as exc:
+                body = ""
+                try:
+                    body = exc.read().decode("utf-8", errors="replace")[:300]
+                except Exception:
+                    pass
+                logger.warning("⚠ Telegram sendPhoto fallito per %s — HTTP %d: %s | %s — fallback a testo",
+                               channel, exc.code, exc.reason, body)
+            except Exception as exc:
+                logger.warning("⚠ Telegram sendPhoto fallito per %s — %s — fallback a testo", channel, exc)
+
+        payload = json.dumps({
+            "chat_id": TELEGRAM_CHAT,
+            "text": caption,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }).encode()
+        url = f"{base_api}/sendMessage"
+
+    elif event == "offline":
+        text = f"{link} — 🔴 Offline"
+        payload = json.dumps({
+            "chat_id": TELEGRAM_CHAT,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }).encode()
+        url = f"{base_api}/sendMessage"
+
+    else:
+        text = f"{link}\n{_tg_escape_html(message)}"
+        payload = json.dumps({
+            "chat_id": TELEGRAM_CHAT,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }).encode()
+        url = f"{base_api}/sendMessage"
+
+    req = urllib.request.Request(url, data=payload,
+                                headers={"Content-Type": "application/json"}, method="POST")
+    urllib.request.urlopen(req, timeout=15)
+
+
+def _notify_webhook(event: str, channel: str, message: str) -> None:
+    payload = json.dumps({
+        "event": event, "channel": channel, "message": message,
+        "timestamp": datetime.utcnow().isoformat() + "Z", "source": "twitch-recorder",
+    }).encode()
+    req = urllib.request.Request(NOTIFY_URL, data=payload,
+                                headers={"Content-Type": "application/json"}, method="POST")
+    urllib.request.urlopen(req, timeout=10)
+
+
 # ─── Recorder ────────────────────────────────────────────────────────────────
 
 class Recorder:
     __slots__ = (
         "channel_name", "process", "output_path",
         "is_recording", "stop_requested", "_lock", "_thread", "_log_fh",
-        "started_at", "quality",
+        "started_at", "quality", "_split_triggered",
     )
 
     def __init__(self, channel_name: str, quality: str = "best"):
@@ -217,6 +385,7 @@ class Recorder:
         self._thread: threading.Thread | None = None
         self._log_fh = None
         self.started_at: float | None = None
+        self._split_triggered = False
 
     def start(self) -> None:
         with self._lock:
@@ -231,6 +400,8 @@ class Recorder:
             )
             self._thread.start()
             logger.info("▶ Avviata registrazione: %s @ %s", self.channel_name, self.quality)
+            _send_notification("rec_start", self.channel_name,
+                               f"Registrazione avviata a {self.quality}")
 
     def stop(self) -> None:
         with self._lock:
@@ -256,6 +427,7 @@ class Recorder:
 
         while not self.stop_requested:
             resolved = _resolve_quality(self.channel_name, self.quality)
+            self._split_triggered = False
 
             self.output_path = os.path.join(
                 RECORDINGS_DIR, _generate_filename(self.channel_name),
@@ -289,32 +461,65 @@ class Recorder:
                 break
 
             elapsed = time.time() - t0
+
+            if self._split_triggered:
+                logger.info("✂ %s: split dopo %s — riavvio",
+                            self.channel_name, _fmt_duration(elapsed))
+                time.sleep(1)
+                continue
+
             if elapsed < 20:
                 if error_start is None:
                     error_start = time.time()
                 if time.time() - error_start > 180:
                     logger.error("Tolleranza errori superata per %s — stop.", self.channel_name)
                     break
-                logger.warning("Crash %s — riavvio tra 5 s…", self.channel_name)
-                time.sleep(5)
+                if self._smart_retry():
+                    error_start = None
+                    continue
+                break
             else:
                 error_start = None
-                logger.info("Split/fine per %s — riavvio.", self.channel_name)
+                logger.info("Fine segmento %s dopo %s — riavvio.",
+                            self.channel_name, _fmt_duration(elapsed))
                 time.sleep(1)
 
         with self._lock:
             self.is_recording = False
             self.started_at = None
+        _send_notification("rec_end", self.channel_name, "Registrazione terminata")
+        _sse_broadcast("update")
+
+    def _smart_retry(self) -> bool:
+        for attempt in range(RECONNECT_TRIES):
+            if self.stop_requested:
+                return False
+            wait = RECONNECT_WAIT + random.uniform(0, 10)
+            logger.info("🔁 %s: riconnessione %d/%d — attendo %.0fs…",
+                        self.channel_name, attempt + 1, RECONNECT_TRIES, wait)
+            time.sleep(wait)
+            if self.stop_requested:
+                return False
+            is_online, _ = _is_channel_online(self.channel_name)
+            if is_online:
+                logger.info("✅ %s: stream ancora attivo, riprendo registrazione",
+                            self.channel_name)
+                return True
+        logger.info("❌ %s: stream non più disponibile dopo %d tentativi",
+                    self.channel_name, RECONNECT_TRIES)
+        return False
 
     def _watch_size(self, proc: subprocess.Popen, path: str) -> None:
         if MAX_FILE_SIZE <= 0:
             return
+        threshold = max(int(MAX_FILE_SIZE * 0.97), MAX_FILE_SIZE - 20 * 1024 * 1024)
         while not self.stop_requested:
             if proc.poll() is not None:
                 return
             try:
-                if os.path.exists(path) and os.path.getsize(path) >= MAX_FILE_SIZE:
-                    logger.info("Split %s", path)
+                if os.path.exists(path) and os.path.getsize(path) >= threshold:
+                    logger.info("Split %s (%s)", path, _human_size(os.path.getsize(path)))
+                    self._split_triggered = True
                     proc.terminate()
                     return
             except OSError:
@@ -331,42 +536,227 @@ _recorders: dict[str, Recorder] = {
     for ch in _channels
 }
 _online_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="online-check")
+_online_status: dict[str, bool] = {}
+_last_checked: dict[str, float] = {}
+_force_check: set[str] = set()
+_sse_subscribers: list[queue.Queue] = []
+_sse_lock = threading.Lock()
+_monitor_heartbeat: float = 0.0
 
+
+# ─── SSE ──────────────────────────────────────────────────────────────────────
+
+def _sse_broadcast(event: str = "status") -> None:
+    data = _build_status_json()
+    msg = f"event: {event}\ndata: {json.dumps(data)}\n\n"
+    with _sse_lock:
+        dead = []
+        for q in _sse_subscribers:
+            try:
+                q.put_nowait(msg)
+            except Exception:
+                dead.append(q)
+        for q in dead:
+            try:
+                _sse_subscribers.remove(q)
+            except ValueError:
+                pass
+
+
+def _build_status_json() -> dict:
+    with _lock:
+        ch_list = []
+        for ch in _channels:
+            rec = _recorders.get(ch["name"])
+            lc = _last_checked.get(ch["name"], 0)
+            ch_list.append({
+                "name": ch["name"],
+                "online": _online_status.get(ch["name"], False),
+                "is_recording": ch.get("is_recording", False),
+                "actually_recording": rec.is_recording if rec else False,
+                "uptime": round(rec.uptime) if rec else 0,
+                "uptime_human": _fmt_duration(rec.uptime) if rec and rec.uptime > 0 else None,
+                "quality": ch.get("quality", STREAM_QUALITY),
+                "current_file": os.path.basename(rec.output_path) if rec and rec.output_path else None,
+                "last_checked": round(time.time() - lc) if lc > 0 else None,
+            })
+    recordings = _list_recordings()
+    disk = _disk_stats()
+    total_rec_size = sum(r["size"] for r in recordings)
+    return {
+        "channels": ch_list,
+        "recordings": recordings,
+        "disk": disk,
+        "quality_options": QUALITY_OPTIONS,
+        "config": {
+            "reconnect_wait": RECONNECT_WAIT,
+            "reconnect_tries": RECONNECT_TRIES,
+            "notify_type": NOTIFY_TYPE or "none",
+            "check_paused_rooms": CHECK_PAUSED_ROOMS,
+        },
+        "stats": {
+            "total_channels": len(ch_list),
+            "online_channels": sum(1 for c in ch_list if c["online"]),
+            "active_recordings": sum(1 for c in ch_list if c["actually_recording"]),
+            "total_files": len(recordings),
+            "total_size": total_rec_size,
+            "total_size_human": _human_size(total_rec_size),
+            "monitor_alive": _monitor_thread.is_alive(),
+        },
+    }
+
+
+# ─── Monitor ─────────────────────────────────────────────────────────────────
 
 def _monitor_loop() -> None:
+    global _monitor_heartbeat
+
+    logger.info("🚀 Monitor avviato — %d canali, intervallo %ds",
+                len(_channels), CHECK_INTERVAL)
+    if NOTIFY_TYPE:
+        logger.info("📢 Notifiche: type=%s, events=%s, photo=%s",
+                    NOTIFY_TYPE, NOTIFY_EVENTS,
+                    "✓" if TELEGRAM_PHOTO else "✗")
+    else:
+        logger.info("📢 Notifiche: disattivate (NOTIFY_TYPE vuoto)")
+
+    cycle = 0
     while True:
+        cycle += 1
         try:
             with _lock:
                 snapshot = copy.deepcopy(_channels)
+                priority = list(_force_check)
+                _force_check.clear()
+
+            if not snapshot:
+                logger.info("── Ciclo #%d: nessun canale configurato, attendo %ds",
+                            cycle, CHECK_INTERVAL)
+                time.sleep(CHECK_INTERVAL)
+                continue
+
+            if CHECK_PAUSED_ROOMS:
+                active = snapshot
+            else:
+                active = [ch for ch in snapshot if ch.get("is_recording", True)]
+            skipped = len(snapshot) - len(active)
+
+            # Aggiungi canali prioritari anche se in pausa
+            if priority:
+                priority_set = set(priority)
+                paused_priority = [ch for ch in snapshot
+                                   if ch["name"] in priority_set and ch not in active]
+                active = paused_priority + active
+
+            logger.info("── Ciclo #%d: check %d canali%s%s ──",
+                        cycle, len(active),
+                        f" (skip {skipped} in pausa)" if skipped else "",
+                        f" ({len(priority)} prioritari)" if priority else "")
 
             futures = {
                 _online_pool.submit(_is_channel_online, ch["name"]): ch["name"]
-                for ch in snapshot
+                for ch in active
             }
-            online: dict[str, bool] = {}
+            results: dict[str, tuple[bool, bool]] = {}
             for fut in as_completed(futures):
-                online[futures[fut]] = fut.result()
+                name = futures[fut]
+                try:
+                    results[name] = fut.result()
+                except Exception:
+                    results[name] = (False, False)
+
+            online_map: dict[str, bool] = {}
 
             with _lock:
                 for ch in _channels:
                     name = ch["name"]
-                    ch["online"] = online.get(name, False)
+                    if name not in results:
+                        continue
+                    is_online, is_certain = results[name]
+                    was_online = _online_status.get(name, False)
+                    _last_checked[name] = time.time()
+
+                    if is_certain:
+                        _online_status[name] = is_online
+                        if is_online and not was_online:
+                            _send_notification("online", name, "Il canale e' online!")
+                        elif not is_online and was_online:
+                            _send_notification("offline", name, "Il canale e' offline")
+                    else:
+                        is_online = was_online
+
+                    online_map[name] = is_online
+
                     rec = _recorders.get(name)
                     if rec is None:
                         continue
                     rec.quality = ch.get("quality", STREAM_QUALITY)
                     should = ch.get("is_recording", False)
-                    if should and ch["online"] and not rec.is_recording:
+                    if should and is_online and not rec.is_recording:
                         rec.start()
-                    elif (not should or not ch["online"]) and rec.is_recording:
+                    elif (not should or not is_online) and rec.is_recording:
                         rec.stop()
                 _save_channels(_channels)
+
+            _monitor_heartbeat = time.time()
+
+            n_online = sum(1 for v in online_map.values() if v)
+            n_offline = len(online_map) - n_online
+            online_names = [n for n, v in online_map.items() if v]
+            logger.info(
+                "── Ciclo #%d completato: %d online, %d offline%s",
+                cycle, n_online, n_offline,
+                f" — online: {', '.join(online_names)}" if online_names else "",
+            )
+
+            _sse_broadcast("cycle_complete")
+
         except Exception as exc:
-            logger.error("Errore monitor: %s", exc)
-        time.sleep(CHECK_INTERVAL)
+            logger.error("Errore monitor ciclo #%d: %s", cycle, exc, exc_info=True)
+
+        sleep_time = CHECK_INTERVAL + random.uniform(0, JITTER_MAX)
+        time.sleep(sleep_time)
 
 
-threading.Thread(target=_monitor_loop, daemon=True, name="monitor").start()
+_monitor_thread = threading.Thread(target=_monitor_loop, daemon=True, name="monitor")
+_monitor_thread.start()
+
+
+# ─── Watchdog ─────────────────────────────────────────────────────────────────
+
+def _watchdog_loop() -> None:
+    global _monitor_thread
+    while True:
+        time.sleep(60)
+        try:
+            if not _monitor_thread.is_alive():
+                logger.error("Monitor morto — riavvio!")
+                _monitor_thread = threading.Thread(
+                    target=_monitor_loop, daemon=True, name="monitor")
+                _monitor_thread.start()
+            elif _monitor_heartbeat > 0:
+                stale = time.time() - _monitor_heartbeat
+                if stale > CHECK_INTERVAL * 3 + 300:
+                    logger.error("Monitor bloccato da %.0fs — riavvio!", stale)
+                    _monitor_thread = threading.Thread(
+                        target=_monitor_loop, daemon=True, name="monitor")
+                    _monitor_thread.start()
+        except Exception as exc:
+            logger.error("Errore watchdog: %s", exc)
+
+
+threading.Thread(target=_watchdog_loop, daemon=True, name="watchdog").start()
+
+
+# ─── SSE broadcast dopo azioni POST ──────────────────────────────────────────
+
+@app.after_request
+def _after_request_sse(response):
+    if request.method == "POST" and request.endpoint in (
+        "index", "delete_recording", "api_import", "api_force_check"
+    ):
+        threading.Timer(0.3, _sse_broadcast, args=("action",)).start()
+    return response
 
 
 # ─── Rotte pagina ────────────────────────────────────────────────────────────
@@ -389,10 +779,11 @@ def index():
                     flash("Canale già presente.", "warning")
                 else:
                     entry = {"name": channel_name, "is_recording": True,
-                             "online": False, "quality": quality}
+                             "quality": quality}
                     _channels.append(entry)
                     _recorders[channel_name] = Recorder(channel_name, quality)
                     _save_channels(_channels)
+                    _force_check.add(channel_name)
                     flash(f"{channel_name} aggiunto.", "success")
 
         elif action in ("pause", "resume") and channel_name:
@@ -414,6 +805,7 @@ def index():
                 if rec:
                     rec.stop()
                 _channels = [c for c in _channels if c["name"] != channel_name]
+                _online_status.pop(channel_name, None)
                 _save_channels(_channels)
 
         elif action == "set_quality" and channel_name:
@@ -448,12 +840,15 @@ def index():
 
 @app.route("/recordings/<path:filename>")
 def download_recording(filename):
-    return send_from_directory(RECORDINGS_DIR, filename)
+    safe = os.path.basename(filename)
+    parts = Path(filename).parts
+    if len(parts) > 2 or ".." in parts:
+        abort(400)
+    return send_from_directory(RECORDINGS_DIR, safe)
 
 
 @app.route("/preview/<path:filename>")
 def preview_recording(filename):
-    """Streaming video con supporto byte-range per seek nel browser."""
     safe = os.path.basename(filename)
     path = os.path.join(RECORDINGS_DIR, safe)
     if not os.path.isfile(path):
@@ -518,10 +913,13 @@ def delete_recording():
     safe = os.path.basename(filename)
     path = os.path.join(RECORDINGS_DIR, safe)
     if os.path.exists(path):
-        try:
-            os.remove(path)
-        except OSError as exc:
-            flash(f"Errore: {exc}", "danger")
+        if os.path.abspath(path) in _active_file_paths():
+            flash("Impossibile eliminare: registrazione in corso.", "danger")
+        else:
+            try:
+                os.remove(path)
+            except OSError as exc:
+                flash(f"Errore: {exc}", "danger")
     return redirect(url_for("index"))
 
 
@@ -529,41 +927,277 @@ def delete_recording():
 
 @app.route("/api/status")
 def api_status():
-    with _lock:
-        ch_list = []
-        for ch in _channels:
-            rec = _recorders.get(ch["name"])
-            ch_list.append({
-                "name": ch["name"],
-                "online": ch.get("online", False),
-                "is_recording": ch.get("is_recording", False),
-                "actually_recording": rec.is_recording if rec else False,
-                "uptime": round(rec.uptime) if rec else 0,
-                "quality": ch.get("quality", STREAM_QUALITY),
-                "current_file": os.path.basename(rec.output_path) if rec and rec.output_path else None,
-            })
-    recordings = _list_recordings()
-    disk = _disk_stats()
-    total_rec_size = sum(r["size"] for r in recordings)
-    return jsonify({
-        "channels": ch_list,
-        "recordings": recordings,
-        "disk": disk,
-        "quality_options": QUALITY_OPTIONS,
-        "stats": {
-            "total_channels": len(ch_list),
-            "online_channels": sum(1 for c in ch_list if c["online"]),
-            "active_recordings": sum(1 for c in ch_list if c["actually_recording"]),
-            "total_files": len(recordings),
-            "total_size": total_rec_size,
-            "total_size_human": _human_size(total_rec_size),
+    return jsonify(_build_status_json())
+
+
+@app.route("/api/stream")
+def api_stream():
+    """SSE endpoint per aggiornamenti live in tempo reale."""
+    def event_stream():
+        q = queue.Queue(maxsize=50)
+        with _sse_lock:
+            _sse_subscribers.append(q)
+        try:
+            data = _build_status_json()
+            yield f"event: status\ndata: {json.dumps(data)}\n\n"
+            while True:
+                try:
+                    msg = q.get(timeout=15)
+                    yield msg
+                    while not q.empty():
+                        try:
+                            yield q.get_nowait()
+                        except queue.Empty:
+                            break
+                except queue.Empty:
+                    yield ": heartbeat\n\n"
+        except GeneratorExit:
+            pass
+        finally:
+            with _sse_lock:
+                try:
+                    _sse_subscribers.remove(q)
+                except ValueError:
+                    pass
+
+    return Response(
+        event_stream(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
         },
-    })
+    )
+
+
+@app.route("/api/export")
+def api_export():
+    fmt = request.args.get("format", "json").lower()
+    with _lock:
+        data = [{"name": ch["name"], "quality": ch.get("quality", STREAM_QUALITY),
+                 "is_recording": ch.get("is_recording", False)} for ch in _channels]
+
+    if fmt == "csv":
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=["name", "quality", "is_recording"])
+        writer.writeheader()
+        writer.writerows(data)
+        return Response(output.getvalue(), mimetype="text/csv",
+                        headers={"Content-Disposition": "attachment; filename=twitch-channels.csv"})
+
+    return Response(json.dumps(data, indent=2), mimetype="application/json",
+                    headers={"Content-Disposition": "attachment; filename=twitch-channels.json"})
+
+
+@app.route("/api/import", methods=["POST"])
+def api_import():
+    global _channels
+    imported = 0
+    skipped = 0
+
+    try:
+        file = request.files.get("file")
+        if file:
+            content = file.read().decode("utf-8")
+        else:
+            content = request.get_data(as_text=True)
+
+        rooms: list[dict] = []
+        content_stripped = content.strip()
+
+        if content_stripped.startswith("[") or content_stripped.startswith("{"):
+            parsed = json.loads(content_stripped)
+            if isinstance(parsed, dict):
+                parsed = [parsed]
+            for item in parsed:
+                if isinstance(item, str):
+                    rooms.append({"name": item, "quality": STREAM_QUALITY, "is_recording": True})
+                elif isinstance(item, dict) and "name" in item:
+                    rooms.append({
+                        "name": item["name"],
+                        "quality": item.get("quality", STREAM_QUALITY),
+                        "is_recording": bool(item.get("is_recording", True)),
+                    })
+        else:
+            reader = csv.DictReader(io.StringIO(content))
+            for row in reader:
+                name = row.get("name", "").strip().lower()
+                if name:
+                    rooms.append({
+                        "name": name,
+                        "quality": row.get("quality", STREAM_QUALITY),
+                        "is_recording": str(row.get("is_recording", "true")).lower()
+                            in ("true", "1", "yes"),
+                    })
+
+        with _lock:
+            existing = {c["name"] for c in _channels}
+            for room in rooms:
+                name = re.sub(r"[^a-z0-9_-]", "", room["name"].lower())
+                if not name or name in existing:
+                    skipped += 1
+                    continue
+                entry = {"name": name, "quality": room["quality"],
+                         "is_recording": room["is_recording"]}
+                _channels.append(entry)
+                _recorders[name] = Recorder(name, room["quality"])
+                _force_check.add(name)
+                existing.add(name)
+                imported += 1
+            _save_channels(_channels)
+
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({"imported": imported, "skipped": skipped})
+
+
+@app.route("/api/check", methods=["POST"])
+def api_force_check():
+    """Forza un check immediato per uno o tutti i canali."""
+    room = ""
+    if request.is_json:
+        room = (request.json or {}).get("channel", "").strip()
+    else:
+        room = request.form.get("channel", "").strip()
+    with _lock:
+        if room:
+            _force_check.add(room)
+        else:
+            for ch in _channels:
+                _force_check.add(ch["name"])
+    return jsonify({"queued": len(_force_check)})
+
+
+@app.route("/api/toggle_check_paused", methods=["POST"])
+def api_toggle_check_paused():
+    global CHECK_PAUSED_ROOMS
+    CHECK_PAUSED_ROOMS = not CHECK_PAUSED_ROOMS
+    logger.info("CHECK_PAUSED_ROOMS → %s", CHECK_PAUSED_ROOMS)
+    _sse_broadcast("action")
+    return jsonify({"check_paused_rooms": CHECK_PAUSED_ROOMS})
+
+
+@app.route("/api/room", methods=["POST"])
+def api_room_action():
+    """API JSON per tutte le azioni sui canali."""
+    global _channels
+    data = request.get_json(silent=True) or {}
+    action = data.get("action", "")
+    raw = data.get("channel", "").strip().lower()
+    if "twitch.tv/" in raw:
+        raw = raw.split("twitch.tv/")[-1].strip("/").split("/")[0].split("?")[0]
+    channel_name = re.sub(r"[^a-z0-9_-]", "", raw)
+    quality = data.get("quality", STREAM_QUALITY)
+
+    if action == "add" and channel_name:
+        with _lock:
+            if any(c["name"] == channel_name for c in _channels):
+                return jsonify({"ok": False, "msg": "Canale già presente."})
+            entry = {"name": channel_name, "is_recording": True,
+                     "quality": quality}
+            _channels.append(entry)
+            _recorders[channel_name] = Recorder(channel_name, quality)
+            _save_channels(_channels)
+            _force_check.add(channel_name)
+        _sse_broadcast("action")
+        return jsonify({"ok": True, "msg": f"{channel_name} aggiunto."})
+
+    elif action in ("pause", "resume") and channel_name:
+        rec_to_stop = None
+        with _lock:
+            ch = next((c for c in _channels if c["name"] == channel_name), None)
+            if ch:
+                rec = _recorders.get(channel_name)
+                if action == "pause":
+                    ch["is_recording"] = False
+                    if rec and rec.is_recording:
+                        rec_to_stop = rec
+                else:
+                    ch["is_recording"] = True
+                _save_channels(_channels)
+        if rec_to_stop:
+            rec_to_stop.stop()
+        _sse_broadcast("action")
+        return jsonify({"ok": True})
+
+    elif action == "remove" and channel_name:
+        rec_to_stop = None
+        with _lock:
+            rec_to_stop = _recorders.pop(channel_name, None)
+            _channels = [c for c in _channels if c["name"] != channel_name]
+            _online_status.pop(channel_name, None)
+            _save_channels(_channels)
+        if rec_to_stop:
+            rec_to_stop.stop()
+        _sse_broadcast("action")
+        return jsonify({"ok": True})
+
+    elif action == "set_quality" and channel_name:
+        with _lock:
+            ch = next((c for c in _channels if c["name"] == channel_name), None)
+            if ch:
+                ch["quality"] = quality
+                rec = _recorders.get(channel_name)
+                if rec:
+                    rec.quality = quality
+                _save_channels(_channels)
+        _sse_broadcast("action")
+        return jsonify({"ok": True})
+
+    elif action == "pause_all":
+        recs_to_stop = []
+        with _lock:
+            for ch in _channels:
+                ch["is_recording"] = False
+                rec = _recorders.get(ch["name"])
+                if rec and rec.is_recording:
+                    recs_to_stop.append(rec)
+            _save_channels(_channels)
+        for rec in recs_to_stop:
+            rec.stop()
+        _sse_broadcast("action")
+        return jsonify({"ok": True})
+
+    elif action == "resume_all":
+        with _lock:
+            for ch in _channels:
+                ch["is_recording"] = True
+            _save_channels(_channels)
+        _sse_broadcast("action")
+        return jsonify({"ok": True})
+
+    return jsonify({"ok": False, "msg": "Azione non valida."})
+
+
+@app.route("/api/delete_recording", methods=["POST"])
+def api_delete_recording():
+    data = request.get_json(silent=True) or {}
+    filename = data.get("filename", "")
+    parts = Path(filename).parts
+    if len(parts) > 2 or ".." in parts:
+        return jsonify({"ok": False, "msg": "Path non valido."}), 400
+    path = os.path.join(RECORDINGS_DIR, filename)
+    if not os.path.isfile(path):
+        return jsonify({"ok": False, "msg": "File non trovato."}), 404
+    if os.path.abspath(path) in _active_file_paths():
+        return jsonify({"ok": False, "msg": "Impossibile eliminare: registrazione in corso."})
+    try:
+        os.remove(path)
+    except OSError as exc:
+        return jsonify({"ok": False, "msg": str(exc)})
+    _sse_broadcast("action")
+    return jsonify({"ok": True})
 
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok"}), 200
+    return jsonify({
+        "status": "ok",
+        "monitor_alive": _monitor_thread.is_alive(),
+        "monitor_last_cycle": round(time.time() - _monitor_heartbeat) if _monitor_heartbeat > 0 else None,
+    }), 200
 
 
 # ─── Shutdown ─────────────────────────────────────────────────────────────────
@@ -580,4 +1214,4 @@ def _shutdown(sig, _frame):
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
-    app.run(host="0.0.0.0", port=PORT)
+    app.run(host="0.0.0.0", port=PORT, threaded=True)
