@@ -10,160 +10,92 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     :root {
-      --tw: #9146ff;
-      --tw-dim: #7c3aed;
-      --tw-glow: rgba(145,70,255,.15);
-      --rec: #ef4444;
-      --online: #22c55e;
-      --surface: #18181b;
-      --surface2: #1f1f23;
-      --surface3: #26262c;
-      --border: #2d2d35;
-      --text1: #efeff1;
-      --text2: #adadb8;
-      --text3: #636370;
+      --tw: #9146ff; --tw-dim: #7c3aed; --tw-glow: rgba(145,70,255,.15);
+      --rec: #ef4444; --online: #22c55e;
+      --surface: #18181b; --surface2: #1f1f23; --surface3: #26262c;
+      --border: #2d2d35; --text1: #efeff1; --text2: #adadb8; --text3: #636370;
     }
     [data-bs-theme="light"] {
       --surface: #ffffff; --surface2: #f7f7f8; --surface3: #efefef;
       --border: #e0e0e4; --text1: #0e0e10; --text2: #53535f; --text3: #adadb8;
       --tw-glow: rgba(145,70,255,.08);
     }
-
     * { box-sizing: border-box; }
-    body {
-      font-family: 'DM Sans', system-ui, sans-serif;
-      background: var(--surface); color: var(--text1); margin: 0;
-    }
+    body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--surface); color: var(--text1); margin: 0; }
     .shell { max-width: 1100px; margin: 0 auto; padding: 16px; }
 
-    /* ── Header ── */
-    .hdr {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 12px 0; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;
-    }
+    .hdr { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
     .hdr-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.2rem; }
     .hdr-brand i { color: var(--tw); font-size: 1.4rem; }
     .hdr-right { display: flex; align-items: center; gap: 12px; }
     .hdr-meta { font-size: .75rem; color: var(--text3); display: flex; align-items: center; gap: 4px; }
-    .pulse-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--online); animation: pulse 2s ease infinite; }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
-    .pulse-dot.stale { background: var(--rec); animation: none; }
-    .theme-btn {
-      background: var(--surface3); border: 1px solid var(--border); border-radius: 8px;
-      width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
-      color: var(--text2); cursor: pointer; transition: all .15s;
-    }
-    .theme-btn:hover { border-color: var(--tw); color: var(--tw); }
 
-    /* ── Stats strip ── */
-    .stats-strip {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-      gap: 8px; margin-bottom: 12px;
-    }
-    .stat-pill {
-      background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 10px; padding: 10px 14px;
-      display: flex; align-items: center; gap: 10px; transition: border-color .2s;
-    }
+    .sse-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--online); animation: pulse 2s ease infinite; transition: background .3s; }
+    .sse-dot.disconnected { background: var(--rec); animation: none; }
+    .sse-dot.connecting { background: #fbbf24; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    .config-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+    .config-tag { font-size: .6rem; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: var(--surface3); color: var(--text3); text-transform: uppercase; letter-spacing: .04em; }
+    .config-tag.on { background: var(--tw-glow); color: var(--tw); }
+    .config-tag.clickable { cursor: pointer; transition: all .15s; }
+    .config-tag.clickable:hover { border-color: var(--tw); }
+
+    .icon-btn { background: var(--surface3); border: 1px solid var(--border); border-radius: 8px; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; color: var(--text2); cursor: pointer; transition: all .15s; }
+    .icon-btn:hover { border-color: var(--tw); color: var(--tw); }
+
+    .stats-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 12px; }
+    .stat-pill { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; display: flex; align-items: center; gap: 10px; transition: border-color .2s; }
     .stat-pill:hover { border-color: var(--tw); }
-    .stat-icon {
-      width: 36px; height: 36px; border-radius: 8px;
-      display: flex; align-items: center; justify-content: center; font-size: 1rem; flex-shrink: 0;
-    }
+    .stat-icon { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1rem; flex-shrink: 0; }
     .stat-val { font-size: 1.25rem; font-weight: 700; line-height: 1; }
     .stat-lbl { font-size: .68rem; color: var(--text3); text-transform: uppercase; letter-spacing: .05em; }
 
-    /* ── Disk bar ── */
-    .disk-strip {
-      background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 10px; padding: 8px 14px; margin-bottom: 12px;
-    }
+    .disk-strip { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 8px 14px; margin-bottom: 12px; }
     .disk-bar { height: 6px; border-radius: 3px; background: var(--surface3); overflow: hidden; }
     .disk-fill { height: 100%; border-radius: 3px; transition: width .6s ease; background: var(--tw); }
 
-    /* ── Add form ── */
-    .add-bar {
-      background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 10px; padding: 10px 14px; margin-bottom: 16px;
-    }
+    .add-bar { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; }
     .add-bar form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .add-bar input[type="text"] {
-      flex: 1; min-width: 180px; background: var(--surface3);
-      border: 1px solid var(--border); border-radius: 8px;
-      padding: 8px 12px; color: var(--text1); font-size: .88rem;
-      font-family: inherit; outline: none; transition: border-color .2s;
-    }
+    .add-bar input[type="text"] { flex: 1; min-width: 180px; background: var(--surface3); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text1); font-size: .88rem; font-family: inherit; outline: none; transition: border-color .2s; }
     .add-bar input[type="text"]:focus { border-color: var(--tw); }
     .add-bar input::placeholder { color: var(--text3); }
-    .add-bar select, .ch-quality-select {
-      background: var(--surface3); border: 1px solid var(--border);
-      border-radius: 8px; padding: 8px 10px; color: var(--text1);
-      font-family: inherit; font-size: .82rem; outline: none;
-    }
-    .ch-quality-select {
-      border-radius: 5px; padding: 2px 6px; color: var(--text2);
-      font-family: 'JetBrains Mono', monospace; font-size: .7rem;
-    }
-    .btn-tw {
-      background: var(--tw); color: #fff; border: none; border-radius: 8px;
-      padding: 8px 16px; font-weight: 600; font-family: inherit;
-      font-size: .85rem; cursor: pointer; white-space: nowrap;
-      transition: background .2s, transform .1s;
-    }
+    .add-bar select, .ch-quality-select { background: var(--surface3); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text1); font-family: inherit; font-size: .82rem; outline: none; }
+    .ch-quality-select { border-radius: 5px; padding: 2px 6px; color: var(--text2); font-family: 'JetBrains Mono', monospace; font-size: .7rem; }
+    .btn-tw { background: var(--tw); color: #fff; border: none; border-radius: 8px; padding: 8px 16px; font-weight: 600; font-family: inherit; font-size: .85rem; cursor: pointer; white-space: nowrap; transition: background .2s, transform .1s; }
     .btn-tw:hover { background: var(--tw-dim); }
     .btn-tw:active { transform: scale(.97); }
 
-    /* ── Panel (shared) ── */
-    .panel {
-      background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 12px; overflow: hidden; margin-bottom: 16px;
-    }
-    .panel-hdr {
-      padding: 10px 14px; font-weight: 600; font-size: .85rem;
-      border-bottom: 1px solid var(--border);
-      display: flex; justify-content: space-between; align-items: center; gap: 8px;
-    }
+    .panel { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 16px; }
+    .panel-hdr { padding: 10px 14px; font-weight: 600; font-size: .85rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
     .panel-hdr-left { display: flex; align-items: center; gap: 8px; }
-    .panel-hdr .badge-count {
-      background: var(--tw-glow); color: var(--tw);
-      border-radius: 6px; padding: 2px 8px; font-size: .72rem; font-weight: 600;
-    }
+    .panel-hdr .badge-count { background: var(--tw-glow); color: var(--tw); border-radius: 6px; padding: 2px 8px; font-size: .72rem; font-weight: 600; }
 
-    /* ── Bulk action buttons ── */
-    .bulk-btns { display: flex; gap: 4px; }
-    .bulk-btn {
-      background: transparent; border: 1px solid var(--border); border-radius: 6px;
-      padding: 3px 10px; color: var(--text2); cursor: pointer;
-      font-family: inherit; font-size: .7rem; font-weight: 500;
-      transition: all .15s; display: inline-flex; align-items: center; gap: 4px;
-    }
+    .sort-btns { display: flex; gap: 2px; }
+    .sort-btn { background: transparent; border: 1px solid transparent; border-radius: 5px; padding: 2px 8px; color: var(--text3); cursor: pointer; font-family: inherit; font-size: .68rem; font-weight: 500; transition: all .15s; display: inline-flex; align-items: center; gap: 3px; }
+    .sort-btn:hover { color: var(--text2); }
+    .sort-btn.active { background: var(--tw-glow); color: var(--tw); border-color: rgba(145,70,255,.2); }
+
+    .bulk-btns { display: flex; gap: 4px; flex-wrap: wrap; }
+    .bulk-btn { background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; color: var(--text2); cursor: pointer; font-family: inherit; font-size: .7rem; font-weight: 500; transition: all .15s; display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
     .bulk-btn:hover { border-color: var(--text2); color: var(--text1); background: var(--surface3); }
     .bulk-btn.bp:hover { border-color: #fbbf24; color: #fbbf24; }
     .bulk-btn.br:hover { border-color: var(--online); color: var(--online); }
+    .bulk-btn.be:hover { border-color: var(--tw); color: var(--tw); }
+    .bulk-btn.bi-action:hover { border-color: #38bdf8; color: #38bdf8; }
 
-    /* ── Channel list (auto height, no stretch) ── */
     .ch-list { max-height: 400px; overflow-y: auto; }
     .ch-list::-webkit-scrollbar { width: 4px; }
     .ch-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-    .ch-card {
-      padding: 10px 14px; border-bottom: 1px solid var(--border); transition: background .15s;
-    }
+    .ch-card { padding: 10px 14px; border-bottom: 1px solid var(--border); transition: background .15s; }
     .ch-card:hover { background: var(--surface3); }
     .ch-card:last-child { border-bottom: none; }
     .ch-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
-    .ch-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-    .ch-name {
-      font-weight: 600; font-size: .92rem; color: var(--text1);
-      text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
+    .ch-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+    .ch-name { font-weight: 600; font-size: .92rem; color: var(--text1); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .ch-name:hover { color: var(--tw); }
-    .ch-badges { display: flex; gap: 4px; flex-shrink: 0; }
-    .badge-sm {
-      font-size: .65rem; font-weight: 600; padding: 2px 7px; border-radius: 4px;
-      text-transform: uppercase; letter-spacing: .03em;
-      display: inline-flex; align-items: center; gap: 3px;
-    }
+    .ch-badges { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; }
+    .badge-sm { font-size: .65rem; font-weight: 600; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; letter-spacing: .03em; display: inline-flex; align-items: center; gap: 3px; }
     .badge-online { background: rgba(34,197,94,.12); color: #22c55e; }
     .badge-offline { background: rgba(99,99,112,.12); color: var(--text3); }
     .badge-rec { background: rgba(239,68,68,.12); color: #ef4444; }
@@ -174,152 +106,118 @@
     .ch-quality-row { display: flex; align-items: center; gap: 6px; }
     .ch-quality-label { font-size: .7rem; color: var(--text3); }
     .ch-actions { display: flex; gap: 4px; }
-    .ch-btn {
-      background: transparent; border: 1px solid var(--border); border-radius: 6px;
-      padding: 4px 8px; color: var(--text2); cursor: pointer; font-size: .78rem;
-      transition: all .15s; display: inline-flex; align-items: center; gap: 3px;
-    }
+    .ch-btn { background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; color: var(--text2); cursor: pointer; font-size: .78rem; transition: all .15s; display: inline-flex; align-items: center; gap: 3px; }
     .ch-btn:hover { border-color: var(--text2); color: var(--text1); background: var(--surface3); }
     .ch-btn.btn-pause:hover { border-color: #fbbf24; color: #fbbf24; }
     .ch-btn.btn-play:hover { border-color: var(--online); color: var(--online); }
     .ch-btn.btn-del:hover { border-color: var(--rec); color: var(--rec); }
     .uptime-tag { font-family: 'JetBrains Mono', monospace; font-size: .65rem; color: var(--text3); margin-left: 4px; }
 
-    /* ── Recordings list (auto height, independent) ── */
     .rec-list { max-height: 400px; overflow-y: auto; }
     .rec-list::-webkit-scrollbar { width: 4px; }
     .rec-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-    .rec-item {
-      padding: 8px 14px; border-bottom: 1px solid var(--border);
-      display: flex; align-items: center; justify-content: space-between; gap: 8px;
-      transition: background .15s;
-    }
+    .rec-item { padding: 8px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; transition: background .15s; }
     .rec-item:hover { background: var(--surface3); }
     .rec-item:last-child { border-bottom: none; }
     .rec-info { min-width: 0; flex: 1; }
     .rec-name { font-size: .82rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
     .rec-meta { font-size: .7rem; color: var(--text3); }
     .rec-actions { display: flex; gap: 3px; flex-shrink: 0; }
-    .rec-btn {
-      background: transparent; border: 1px solid var(--border); border-radius: 5px;
-      width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
-      color: var(--text2); cursor: pointer; transition: all .15s; font-size: .82rem;
-    }
+    .rec-btn { background: transparent; border: 1px solid var(--border); border-radius: 5px; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; color: var(--text2); cursor: pointer; transition: all .15s; font-size: .82rem; }
     .rec-btn:hover { border-color: var(--tw); color: var(--tw); background: var(--tw-glow); }
     .rec-btn.del:hover { border-color: var(--rec); color: var(--rec); background: rgba(239,68,68,.08); }
     .rec-btn a { color: inherit; text-decoration: none; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 
-    /* ── Empty state ── */
-    .empty-state {
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      padding: 32px 20px; color: var(--text3); text-align: center;
-    }
+    .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px 20px; color: var(--text3); text-align: center; }
     .empty-state i { font-size: 2rem; margin-bottom: 8px; opacity: .4; }
     .empty-state p { font-size: .85rem; margin: 0; }
 
-    /* ── Confirm modal ── */
-    .confirm-backdrop {
-      display: none; position: fixed; inset: 0;
-      background: rgba(0,0,0,.6); z-index: 3000;
-      align-items: center; justify-content: center;
-    }
+    .confirm-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 3000; align-items: center; justify-content: center; }
     .confirm-backdrop.open { display: flex; }
-    .confirm-box {
-      background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 12px; padding: 24px; width: 320px;
-      text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,.4);
-    }
+    .confirm-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 320px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,.4); }
     .confirm-box p { margin: 0 0 16px; font-size: .9rem; }
     .confirm-box strong { color: var(--tw); }
     .confirm-btns { display: flex; gap: 8px; justify-content: center; }
-    .confirm-btns button {
-      padding: 8px 20px; border-radius: 8px; border: 1px solid var(--border);
-      background: var(--surface3); color: var(--text1); cursor: pointer;
-      font-family: inherit; font-weight: 500; font-size: .85rem; transition: all .15s;
-    }
+    .confirm-btns button { padding: 8px 20px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface3); color: var(--text1); cursor: pointer; font-family: inherit; font-weight: 500; font-size: .85rem; transition: all .15s; }
     .confirm-btns .btn-danger { background: var(--rec); border-color: var(--rec); color: #fff; }
     .confirm-btns .btn-danger:hover { background: #dc2626; }
     .confirm-btns button:not(.btn-danger):hover { background: var(--border); }
 
-    /* ── Toasts ── */
+    .import-area { margin: 12px 0; }
+    .import-area input[type="file"] { display: none; }
+    .import-result { margin-top: 8px; font-size: .82rem; }
+    .import-result.ok { color: var(--online); }
+    .import-result.err { color: var(--rec); }
+
     .toast-rack { position: fixed; top: 12px; right: 12px; z-index: 4000; display: flex; flex-direction: column; gap: 6px; }
+    .toast-msg { padding: 8px 16px; border-radius: 8px; font-size: .82rem; font-weight: 500; animation: fadeIn .2s; }
+    .toast-msg.success { background: rgba(34,197,94,.15); color: #22c55e; border: 1px solid rgba(34,197,94,.3); }
+    .toast-msg.warning { background: rgba(251,191,36,.15); color: #fbbf24; border: 1px solid rgba(251,191,36,.3); }
+    .toast-msg.danger { background: rgba(239,68,68,.15); color: #ef4444; border: 1px solid rgba(239,68,68,.3); }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:none} }
   </style>
 </head>
 <body>
 
 <div class="toast-rack" id="toastRack"></div>
 
-<!-- Confirm remove channel -->
 <div class="confirm-backdrop" id="confirmRemove">
   <div class="confirm-box">
     <p>Rimuovere <strong id="confirmChName"></strong>?</p>
-    <form method="post">
-      <input type="hidden" name="channel" id="confirmChInput">
-      <input type="hidden" name="action" value="remove">
-      <div class="confirm-btns">
-        <button type="button" onclick="closeConfirm('confirmRemove')">Annulla</button>
-        <button type="submit" class="btn-danger">Rimuovi</button>
-      </div>
-    </form>
+    <div class="confirm-btns">
+      <button type="button" onclick="closeConfirm('confirmRemove')">Annulla</button>
+      <button type="button" class="btn-danger" id="confirmRemoveBtn">Rimuovi</button>
+    </div>
   </div>
 </div>
 
-<!-- Confirm delete file -->
 <div class="confirm-backdrop" id="confirmDelete">
   <div class="confirm-box">
     <p>Eliminare <strong id="confirmFileName" style="word-break:break-all"></strong>?</p>
-    <form method="post" action="/delete_recording">
-      <input type="hidden" name="filename" id="confirmFileInput">
-      <div class="confirm-btns">
-        <button type="button" onclick="closeConfirm('confirmDelete')">Annulla</button>
-        <button type="submit" class="btn-danger">Elimina</button>
-      </div>
-    </form>
+    <div class="confirm-btns">
+      <button type="button" onclick="closeConfirm('confirmDelete')">Annulla</button>
+      <button type="button" class="btn-danger" id="confirmDeleteBtn">Elimina</button>
+    </div>
+  </div>
+</div>
+
+<div class="confirm-backdrop" id="importModal">
+  <div class="confirm-box">
+    <p><i class="bi bi-upload"></i> Importa canali da <strong>JSON</strong> o <strong>CSV</strong></p>
+    <div class="import-area">
+      <label class="btn-tw" style="display:inline-block;padding:8px 20px;cursor:pointer">
+        <i class="bi bi-file-earmark-arrow-up"></i> Scegli file
+        <input type="file" id="importFile" accept=".json,.csv,.txt">
+      </label>
+      <div class="import-result" id="importResult"></div>
+    </div>
+    <div class="confirm-btns" style="margin-top:16px">
+      <button type="button" onclick="closeConfirm('importModal')">Chiudi</button>
+    </div>
   </div>
 </div>
 
 <div class="shell">
-
-  <!-- Header -->
   <div class="hdr">
-    <div class="hdr-brand">
-      <i class="bi bi-camera-video-fill"></i>
-      <span>Twitch Recorder</span>
-    </div>
+    <div class="hdr-brand"><i class="bi bi-camera-video-fill"></i><span>Twitch Recorder</span></div>
     <div class="hdr-right">
+      <div class="config-tags" id="configTags"></div>
       <div class="hdr-meta">
-        <span class="pulse-dot" id="refreshDot"></span>
-        <span>Live <span id="countdown"></span></span>
+        <span class="sse-dot connecting" id="sseDot"></span>
+        <span id="sseLabel">Connessione…</span>
       </div>
-      <button class="theme-btn" id="themeToggle" title="Tema"><i class="bi bi-circle-half"></i></button>
+      <button class="icon-btn" id="themeToggle" title="Tema"><i class="bi bi-circle-half"></i></button>
     </div>
   </div>
 
-  <!-- Stats -->
   <div class="stats-strip">
-    <div class="stat-pill">
-      <div class="stat-icon" style="background:rgba(145,70,255,.1);color:var(--tw)"><i class="bi bi-people-fill"></i></div>
-      <div><div class="stat-val" id="sChannels">—</div><div class="stat-lbl">Canali</div></div>
-    </div>
-    <div class="stat-pill">
-      <div class="stat-icon" style="background:rgba(34,197,94,.1);color:#22c55e"><i class="bi bi-broadcast"></i></div>
-      <div><div class="stat-val" id="sOnline">—</div><div class="stat-lbl">Online</div></div>
-    </div>
-    <div class="stat-pill">
-      <div class="stat-icon" style="background:rgba(239,68,68,.1);color:#ef4444"><i class="bi bi-record-circle"></i></div>
-      <div><div class="stat-val" id="sRec">—</div><div class="stat-lbl">Registrando</div></div>
-    </div>
-    <div class="stat-pill">
-      <div class="stat-icon" style="background:rgba(56,189,248,.1);color:#38bdf8"><i class="bi bi-archive-fill"></i></div>
-      <div><div class="stat-val" id="sFiles">—</div><div class="stat-lbl">File</div></div>
-    </div>
-    <div class="stat-pill">
-      <div class="stat-icon" style="background:rgba(251,191,36,.1);color:#fbbf24"><i class="bi bi-hdd-fill"></i></div>
-      <div><div class="stat-val" id="sSize">—</div><div class="stat-lbl">Usato</div></div>
-    </div>
+    <div class="stat-pill"><div class="stat-icon" style="background:rgba(145,70,255,.1);color:var(--tw)"><i class="bi bi-people-fill"></i></div><div><div class="stat-val" id="sChannels">—</div><div class="stat-lbl">Canali</div></div></div>
+    <div class="stat-pill"><div class="stat-icon" style="background:rgba(34,197,94,.1);color:#22c55e"><i class="bi bi-broadcast"></i></div><div><div class="stat-val" id="sOnline">—</div><div class="stat-lbl">Online</div></div></div>
+    <div class="stat-pill"><div class="stat-icon" style="background:rgba(239,68,68,.1);color:#ef4444"><i class="bi bi-record-circle"></i></div><div><div class="stat-val" id="sRec">—</div><div class="stat-lbl">Registrando</div></div></div>
+    <div class="stat-pill"><div class="stat-icon" style="background:rgba(56,189,248,.1);color:#38bdf8"><i class="bi bi-archive-fill"></i></div><div><div class="stat-val" id="sFiles">—</div><div class="stat-lbl">File</div></div></div>
+    <div class="stat-pill"><div class="stat-icon" style="background:rgba(251,191,36,.1);color:#fbbf24"><i class="bi bi-hdd-fill"></i></div><div><div class="stat-val" id="sSize">—</div><div class="stat-lbl">Usato</div></div></div>
   </div>
 
-  <!-- Disk bar -->
   <div class="disk-strip">
     <div style="display:flex;justify-content:space-between;margin-bottom:4px">
       <small style="color:var(--text3);font-size:.72rem"><span id="diskUsed">—</span> / <span id="diskTotal">—</span></small>
@@ -328,11 +226,10 @@
     <div class="disk-bar"><div class="disk-fill" id="diskFill" style="width:0%"></div></div>
   </div>
 
-  <!-- Add channel -->
   <div class="add-bar">
-    <form method="post">
-      <input type="text" name="channel" placeholder="Nome canale o URL Twitch…" required autocomplete="off">
-      <select name="quality" id="addQuality">
+    <form id="addForm">
+      <input type="text" id="addChannel" placeholder="Nome canale o URL Twitch…" required autocomplete="off">
+      <select id="addQuality">
         <option value="best">best</option>
         <option value="1080p60">1080p60</option>
         <option value="1080p">1080p</option>
@@ -344,89 +241,90 @@
         <option value="worst">worst</option>
         <option value="audio_only">audio</option>
       </select>
-      <button type="submit" name="action" value="add" class="btn-tw">
-        <i class="bi bi-plus-lg"></i> Aggiungi
-      </button>
+      <button type="submit" class="btn-tw"><i class="bi bi-plus-lg"></i> Aggiungi</button>
     </form>
   </div>
 
-  <!-- ═══ Canali (indipendente) ═══ -->
   <div class="panel">
     <div class="panel-hdr">
-      <div class="panel-hdr-left">
-        <span><i class="bi bi-collection-play me-1"></i>Canali</span>
-        <span class="badge-count" id="chCount">0</span>
-      </div>
-      <div class="bulk-btns" id="bulkBtns" style="display:none">
-        <form method="post" style="display:contents">
-          <button type="submit" name="action" value="pause_all" class="bulk-btn bp"><i class="bi bi-pause-fill"></i> Pausa tutti</button>
-          <button type="submit" name="action" value="resume_all" class="bulk-btn br"><i class="bi bi-play-fill"></i> Riprendi tutti</button>
-        </form>
+      <div class="panel-hdr-left"><span><i class="bi bi-collection-play me-1"></i>Canali</span><span class="badge-count" id="chCount">0</span></div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <div class="sort-btns">
+          <button class="sort-btn active" data-sort="default" onclick="setSortMode('default')"><i class="bi bi-list-ul"></i> Default</button>
+          <button class="sort-btn" data-sort="online" onclick="setSortMode('online')"><i class="bi bi-broadcast"></i> Live</button>
+          <button class="sort-btn" data-sort="name" onclick="setSortMode('name')"><i class="bi bi-sort-alpha-down"></i> Nome</button>
+        </div>
+        <div class="bulk-btns" id="bulkBtns" style="display:none">
+          <button class="bulk-btn bp" onclick="bulkAction('pause_all')"><i class="bi bi-pause-fill"></i> Pausa</button>
+          <button class="bulk-btn br" onclick="bulkAction('resume_all')"><i class="bi bi-play-fill"></i> Riprendi</button>
+          <a href="/api/export?format=json" class="bulk-btn be"><i class="bi bi-download"></i> Export</a>
+          <button class="bulk-btn bi-action" onclick="openImport()"><i class="bi bi-upload"></i> Import</button>
+        </div>
       </div>
     </div>
-    <div class="ch-list" id="chList">
-      <div class="empty-state"><i class="bi bi-tv"></i><p>Caricamento…</p></div>
-    </div>
+    <div class="ch-list" id="chList"><div class="empty-state"><i class="bi bi-tv"></i><p>Caricamento…</p></div></div>
   </div>
 
-  <!-- ═══ Registrazioni (indipendente) ═══ -->
   <div class="panel">
     <div class="panel-hdr">
-      <div class="panel-hdr-left">
-        <span><i class="bi bi-film me-1"></i>Registrazioni</span>
-        <span class="badge-count" id="recTotalSize">—</span>
-      </div>
+      <div class="panel-hdr-left"><span><i class="bi bi-film me-1"></i>Registrazioni</span><span class="badge-count" id="recTotalSize">—</span></div>
     </div>
-    <div class="rec-list" id="recList">
-      <div class="empty-state"><i class="bi bi-inbox"></i><p>Caricamento…</p></div>
-    </div>
+    <div class="rec-list" id="recList"><div class="empty-state"><i class="bi bi-inbox"></i><p>Caricamento…</p></div></div>
   </div>
-
 </div>
 
 <script>
 (() => {
   "use strict";
+  let qualityOpts = [], currentSort = localStorage.getItem("tr-sort") || "default";
+  let lastData = null, evtSource = null, reconnectTimer = null;
+  let _pendingRemove = "", _pendingDelete = "";
 
-  const REFRESH = 5;
-  let cd = REFRESH;
-  let qualityOpts = [];
-
-  // ── Theme ──
   const html = document.documentElement;
   const saved = localStorage.getItem("tr-theme");
   if (saved) html.setAttribute("data-bs-theme", saved);
   document.getElementById("themeToggle").addEventListener("click", () => {
     const n = html.getAttribute("data-bs-theme") === "dark" ? "light" : "dark";
-    html.setAttribute("data-bs-theme", n);
-    localStorage.setItem("tr-theme", n);
+    html.setAttribute("data-bs-theme", n); localStorage.setItem("tr-theme", n);
   });
 
-  // ── Flash toasts ──
-  {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}
-  (() => {
-    const rack = document.getElementById("toastRack");
-    {% for cat, msg in messages %}
+  function toast(msg, type="success") {
     const t = document.createElement("div");
-    t.className = "alert alert-{{ cat }} alert-dismissible fade show py-2 px-3 mb-0";
-    t.style.cssText = "font-size:.82rem;min-width:260px;border-radius:8px;";
-    t.innerHTML = '{{ msg }}<button type="button" class="btn-close btn-close-white btn-sm" data-bs-dismiss="alert"></button>';
-    rack.appendChild(t);
-    setTimeout(() => t.remove(), 4000);
-    {% endfor %}
-  })();
-  {% endif %}{% endwith %}
+    t.className = `toast-msg ${type}`; t.textContent = msg;
+    document.getElementById("toastRack").appendChild(t);
+    setTimeout(() => t.remove(), 3000);
+  }
 
-  // ── Helpers ──
+  async function api(url, body) {
+    try {
+      const r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+      return await r.json();
+    } catch(e) { toast("Errore di rete", "danger"); return {ok:false}; }
+  }
+
   function uptime(s) {
     if (!s) return "";
-    const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sc = s%60;
-    return h > 0 ? `${h}h${m}m` : m > 0 ? `${m}m${sc}s` : `${sc}s`;
+    const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sc=s%60;
+    return h>0?`${h}h${String(m).padStart(2,'0')}m`:m>0?`${m}m${String(sc).padStart(2,'0')}s`:`${sc}s`;
   }
-  function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+  function esc(s) { const d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
 
-  // ── Render ──
+  window.setSortMode = function(mode) {
+    currentSort = mode; localStorage.setItem("tr-sort", mode);
+    document.querySelectorAll(".sort-btn").forEach(b => b.classList.toggle("active", b.dataset.sort===mode));
+    if (lastData) render(lastData);
+  };
+  document.querySelectorAll(".sort-btn").forEach(b => b.classList.toggle("active", b.dataset.sort===currentSort));
+
+  function sortChannels(ch) {
+    const a=[...ch];
+    if (currentSort==="online") a.sort((x,y)=>((y.online?100:0)+(y.actually_recording?50:0))-((x.online?100:0)+(x.actually_recording?50:0))||x.name.localeCompare(y.name));
+    else if (currentSort==="name") a.sort((x,y)=>x.name.localeCompare(y.name));
+    return a;
+  }
+
   function render(d) {
+    lastData = d;
     document.getElementById("sChannels").textContent = d.stats.total_channels;
     document.getElementById("sOnline").textContent = d.stats.online_channels;
     document.getElementById("sRec").textContent = d.stats.active_recordings;
@@ -434,151 +332,104 @@
     document.getElementById("sSize").textContent = d.stats.total_size_human;
     document.getElementById("chCount").textContent = d.stats.total_channels;
     document.getElementById("recTotalSize").textContent = d.stats.total_size_human;
+    document.getElementById("bulkBtns").style.display = d.channels.length?"":"none";
 
-    // Show/hide bulk buttons
-    document.getElementById("bulkBtns").style.display = d.channels.length > 0 ? "" : "none";
+    if (d.config) {
+      const cpOn = d.config.check_paused_rooms;
+      document.getElementById("configTags").innerHTML = [
+        d.config.notify_type!=='none'?`<span class="config-tag on">${esc(d.config.notify_type.toUpperCase())}</span>`:'',
+        `<span class="config-tag clickable ${cpOn?'on':''}" onclick="toggleCheckPaused()" title="Controlla canali in pausa: ${cpOn?'ON':'OFF'}">CHECK PAUSA ${cpOn?'ON':'OFF'}</span>`,
+      ].join('');
+    }
 
-    // Disk
     document.getElementById("diskUsed").textContent = d.disk.used_human;
     document.getElementById("diskTotal").textContent = d.disk.total_human;
     document.getElementById("diskFree").textContent = d.disk.free_human;
     const fill = document.getElementById("diskFill");
-    fill.style.width = d.disk.used_pct + "%";
-    fill.style.background = d.disk.used_pct > 90 ? "var(--rec)" : d.disk.used_pct > 75 ? "#fbbf24" : "var(--tw)";
+    fill.style.width = d.disk.used_pct+"%";
+    fill.style.background = d.disk.used_pct>90?"var(--rec)":d.disk.used_pct>75?"#fbbf24":"var(--tw)";
 
-    qualityOpts = d.quality_options || [];
+    qualityOpts = d.quality_options||[];
 
-    // ── Channels ──
+    const sorted = sortChannels(d.channels);
     const cl = document.getElementById("chList");
-    if (!d.channels.length) {
-      cl.innerHTML = '<div class="empty-state"><i class="bi bi-tv"></i><p>Nessun canale — aggiungine uno!</p></div>';
-    } else {
-      cl.innerHTML = d.channels.map(ch => {
-        const online = ch.online
-          ? '<span class="badge-sm badge-online"><span class="dot-rec" style="background:var(--online);animation:none;width:5px;height:5px"></span>Online</span>'
-          : '<span class="badge-sm badge-offline">Offline</span>';
-
-        let recBadge;
-        if (ch.actually_recording) {
-          recBadge = `<span class="badge-sm badge-rec"><span class="dot-rec"></span>REC</span>`;
-          if (ch.uptime) recBadge += `<span class="uptime-tag">${uptime(ch.uptime)}</span>`;
-        } else if (ch.is_recording) {
-          recBadge = '<span class="badge-sm badge-waiting">In attesa</span>';
-        } else {
-          recBadge = '<span class="badge-sm badge-paused">Pausa</span>';
-        }
-
-        const qOpts = qualityOpts.map(q =>
-          `<option value="${q}"${q === ch.quality ? ' selected' : ''}>${q}</option>`
-        ).join('');
-
-        const toggleBtn = ch.is_recording
-          ? `<button class="ch-btn btn-pause" onclick="chAction('pause','${esc(ch.name)}')"><i class="bi bi-pause-fill"></i></button>`
-          : `<button class="ch-btn btn-play" onclick="chAction('resume','${esc(ch.name)}')"><i class="bi bi-play-fill"></i></button>`;
-
-        return `<div class="ch-card">
-          <div class="ch-top">
-            <div class="ch-name-row">
-              <a href="https://twitch.tv/${esc(ch.name)}" target="_blank" class="ch-name">${esc(ch.name)}</a>
-              <div class="ch-badges">${online}${recBadge}</div>
-            </div>
-          </div>
-          <div class="ch-bottom">
-            <div class="ch-quality-row">
-              <span class="ch-quality-label">Qualità:</span>
-              <select class="ch-quality-select" onchange="setQuality('${esc(ch.name)}', this.value)">${qOpts}</select>
-            </div>
-            <div class="ch-actions">
-              ${toggleBtn}
-              <button class="ch-btn btn-del" onclick="confirmRemoveCh('${esc(ch.name)}')"><i class="bi bi-trash3"></i></button>
-            </div>
-          </div>
-        </div>`;
+    if (!sorted.length) { cl.innerHTML='<div class="empty-state"><i class="bi bi-tv"></i><p>Nessun canale — aggiungine uno!</p></div>'; }
+    else {
+      cl.innerHTML = sorted.map(ch => {
+        const online = ch.online?'<span class="badge-sm badge-online"><span class="dot-rec" style="background:var(--online);animation:none;width:5px;height:5px"></span>Online</span>':'<span class="badge-sm badge-offline">Offline</span>';
+        let rb; if(ch.actually_recording){rb=`<span class="badge-sm badge-rec"><span class="dot-rec"></span>REC</span>`;if(ch.uptime)rb+=`<span class="uptime-tag">${uptime(ch.uptime)}</span>`;}else if(ch.is_recording){rb='<span class="badge-sm badge-waiting">In attesa</span>';}else{rb='<span class="badge-sm badge-paused">Pausa</span>';}
+        const qo=qualityOpts.map(q=>`<option value="${q}"${q===ch.quality?' selected':''}>${q}</option>`).join('');
+        const tb=ch.is_recording?`<button class="ch-btn btn-pause" onclick="chAction('pause','${esc(ch.name)}')"><i class="bi bi-pause-fill"></i></button>`:`<button class="ch-btn btn-play" onclick="chAction('resume','${esc(ch.name)}')"><i class="bi bi-play-fill"></i></button>`;
+        const lc=ch.last_checked!=null?`<span class="uptime-tag" title="Ultimo check">${uptime(ch.last_checked)} fa</span>`:'<span class="uptime-tag" style="color:var(--rec)">mai</span>';
+        return `<div class="ch-card" data-name="${esc(ch.name)}"><div class="ch-top"><div class="ch-name-row"><a href="https://twitch.tv/${esc(ch.name)}" target="_blank" class="ch-name">${esc(ch.name)}</a><div class="ch-badges">${online}${rb}${lc}</div></div></div><div class="ch-bottom"><div class="ch-quality-row"><span class="ch-quality-label">Qualità:</span><select class="ch-quality-select" onchange="setQuality('${esc(ch.name)}',this.value)">${qo}</select></div><div class="ch-actions">${tb}<button class="ch-btn" onclick="forceCheck('${esc(ch.name)}')" title="Controlla ora"><i class="bi bi-arrow-clockwise"></i></button><button class="ch-btn btn-del" onclick="confirmRemoveCh('${esc(ch.name)}')"><i class="bi bi-trash3"></i></button></div></div></div>`;
       }).join('');
     }
 
-    // ── Recordings ──
     const rl = document.getElementById("recList");
-    if (!d.recordings.length) {
-      rl.innerHTML = '<div class="empty-state"><i class="bi bi-inbox"></i><p>Nessuna registrazione</p></div>';
-    } else {
-      rl.innerHTML = d.recordings.map(f => `
-        <div class="rec-item">
-          <div class="rec-info">
-            <span class="rec-name">${esc(f.name)}</span>
-            <span class="rec-meta">${f.size_human} &middot; ${f.modified}</span>
-          </div>
-          <div class="rec-actions">
-            <div class="rec-btn">
-              <a href="/recordings/${encodeURIComponent(f.name)}" download title="Scarica"><i class="bi bi-download"></i></a>
-            </div>
-            <div class="rec-btn del" title="Elimina" onclick="confirmDeleteFile('${esc(f.name)}')">
-              <i class="bi bi-trash3"></i>
-            </div>
-          </div>
-        </div>
-      `).join('');
+    if (!d.recordings.length) { rl.innerHTML='<div class="empty-state"><i class="bi bi-inbox"></i><p>Nessuna registrazione</p></div>'; }
+    else {
+      rl.innerHTML = d.recordings.map(f => {
+        const del=f.in_use?'<div class="rec-btn" style="opacity:.3;cursor:not-allowed" title="In registrazione"><i class="bi bi-lock-fill"></i></div>':`<div class="rec-btn del" onclick="confirmDeleteFile('${esc(f.name)}')"><i class="bi bi-trash3"></i></div>`;
+        const rt=f.in_use?'<span class="badge-sm badge-rec" style="margin-left:6px;font-size:.55rem"><span class="dot-rec" style="width:4px;height:4px"></span>REC</span>':'';
+        return `<div class="rec-item"><div class="rec-info"><span class="rec-name">${esc(f.name)}${rt}</span><span class="rec-meta">${f.size_human} &middot; ${f.modified}</span></div><div class="rec-actions"><div class="rec-btn"><a href="/recordings/${encodeURIComponent(f.name)}" download><i class="bi bi-download"></i></a></div>${del}</div></div>`;
+      }).join('');
     }
   }
 
-  // ── Actions ──
-  window.chAction = function(action, name) {
-    const f = document.createElement("form");
-    f.method = "post"; f.style.display = "none";
-    f.innerHTML = `<input name="channel" value="${name}"><input name="action" value="${action}">`;
-    document.body.appendChild(f); f.submit();
-  };
-
-  window.setQuality = function(name, quality) {
-    const f = document.createElement("form");
-    f.method = "post"; f.style.display = "none";
-    f.innerHTML = `<input name="channel" value="${name}"><input name="action" value="set_quality"><input name="quality" value="${quality}">`;
-    document.body.appendChild(f); f.submit();
-  };
-
-  window.confirmRemoveCh = function(name) {
-    document.getElementById("confirmChName").textContent = name;
-    document.getElementById("confirmChInput").value = name;
-    document.getElementById("confirmRemove").classList.add("open");
-  };
-
-  window.confirmDeleteFile = function(name) {
-    document.getElementById("confirmFileName").textContent = name;
-    document.getElementById("confirmFileInput").value = name;
-    document.getElementById("confirmDelete").classList.add("open");
-  };
-
-  window.closeConfirm = function(id) {
-    document.getElementById(id).classList.remove("open");
-  };
-
-  // ESC to close modals
-  document.addEventListener("keydown", e => {
-    if (e.key === "Escape") { closeConfirm("confirmRemove"); closeConfirm("confirmDelete"); }
-  });
-  ["confirmRemove", "confirmDelete"].forEach(id => {
-    document.getElementById(id).addEventListener("click", e => {
-      if (e.target.id === id) closeConfirm(id);
-    });
-  });
-
-  // ── Refresh ──
-  async function refresh() {
-    const dot = document.getElementById("refreshDot");
-    try {
-      const r = await fetch("/api/status");
-      if (!r.ok) throw new Error();
-      render(await r.json());
-      dot.classList.remove("stale");
-    } catch { dot.classList.add("stale"); }
+  // ── SSE ──
+  function setSseStatus(s) {
+    const dot=document.getElementById("sseDot"), lbl=document.getElementById("sseLabel");
+    dot.className="sse-dot";
+    if(s==="connected")lbl.textContent="Live";
+    else if(s==="connecting"){dot.classList.add("connecting");lbl.textContent="Connessione…";}
+    else{dot.classList.add("disconnected");lbl.textContent="Disconnesso";}
+  }
+  function connectSSE() {
+    if(evtSource)evtSource.close(); setSseStatus("connecting");
+    evtSource=new EventSource("/api/stream");
+    ["status","update","cycle_complete","action"].forEach(e=>evtSource.addEventListener(e,ev=>{try{render(JSON.parse(ev.data));setSseStatus("connected");}catch{}}));
+    evtSource.onopen=()=>setSseStatus("connected");
+    evtSource.onerror=()=>{setSseStatus("disconnected");evtSource.close();if(reconnectTimer)clearTimeout(reconnectTimer);reconnectTimer=setTimeout(connectSSE,3000);};
   }
 
-  refresh();
-  setInterval(() => {
-    cd--;
-    document.getElementById("countdown").textContent = `${cd}s`;
-    if (cd <= 0) { cd = REFRESH; refresh(); }
-  }, 1000);
+  // ── Actions (AJAX) ──
+  document.getElementById("addForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const ch=document.getElementById("addChannel").value.trim(), q=document.getElementById("addQuality").value;
+    if(!ch)return;
+    const r=await api("/api/room",{action:"add",channel:ch,quality:q});
+    toast(r.msg||(r.ok?"Aggiunto":"Errore"),r.ok?"success":"warning");
+    if(r.ok)document.getElementById("addChannel").value="";
+  });
+
+  window.chAction=async(action,name)=>api("/api/room",{action,channel:name});
+  window.setQuality=async(name,q)=>api("/api/room",{action:"set_quality",channel:name,quality:q});
+  window.bulkAction=async(action)=>api("/api/room",{action});
+  window.forceCheck=async name=>{await api("/api/check",{channel:name});toast("Check richiesto");};
+  window.toggleCheckPaused=async()=>{const r=await api("/api/toggle_check_paused",{});toast(`Check canali in pausa: ${r.check_paused_rooms?'ON':'OFF'}`);};
+
+  window.confirmRemoveCh=name=>{_pendingRemove=name;document.getElementById("confirmChName").textContent=name;document.getElementById("confirmRemove").classList.add("open");};
+  document.getElementById("confirmRemoveBtn").addEventListener("click",async()=>{if(!_pendingRemove)return;await api("/api/room",{action:"remove",channel:_pendingRemove});_pendingRemove="";closeConfirm("confirmRemove");});
+
+  window.confirmDeleteFile=name=>{_pendingDelete=name;document.getElementById("confirmFileName").textContent=name;document.getElementById("confirmDelete").classList.add("open");};
+  document.getElementById("confirmDeleteBtn").addEventListener("click",async()=>{if(!_pendingDelete)return;const r=await api("/api/delete_recording",{filename:_pendingDelete});if(!r.ok)toast(r.msg||"Errore","danger");_pendingDelete="";closeConfirm("confirmDelete");});
+
+  window.closeConfirm=id=>document.getElementById(id).classList.remove("open");
+  window.openImport=()=>document.getElementById("importModal").classList.add("open");
+
+  document.getElementById("importFile").addEventListener("change",async function(){
+    const file=this.files[0]; if(!file)return;
+    const res=document.getElementById("importResult");
+    try{const fd=new FormData();fd.append("file",file);const r=await fetch("/api/import",{method:"POST",body:fd});const d=await r.json();if(r.ok){res.className="import-result ok";res.textContent=`Importati ${d.imported} canali, ${d.skipped} saltati.`;setTimeout(()=>closeConfirm("importModal"),2000);}else{res.className="import-result err";res.textContent=d.error||"Errore";}}
+    catch(e){res.className="import-result err";res.textContent="Errore: "+e.message;}
+    this.value="";
+  });
+
+  document.addEventListener("keydown",e=>{if(e.key==="Escape"){closeConfirm("confirmRemove");closeConfirm("confirmDelete");closeConfirm("importModal");}});
+  ["confirmRemove","confirmDelete","importModal"].forEach(id=>document.getElementById(id).addEventListener("click",e=>{if(e.target.id===id)closeConfirm(id);}));
+
+  if(typeof EventSource!=="undefined"){connectSSE();setInterval(async()=>{try{const r=await fetch("/api/status");if(r.ok)render(await r.json());}catch{}},30000);}
+  else{(async()=>{try{const r=await fetch("/api/status");if(r.ok)render(await r.json());}catch{}})();setInterval(async()=>{try{const r=await fetch("/api/status");if(r.ok)render(await r.json());}catch{}},8000);}
 })();
 </script>
 </body>
