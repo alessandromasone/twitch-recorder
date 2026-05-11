@@ -535,7 +535,7 @@ _recorders: dict[str, Recorder] = {
     ch["name"]: Recorder(ch["name"], ch.get("quality", STREAM_QUALITY))
     for ch in _channels
 }
-_online_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="online-check")
+_online_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="online-check")
 _online_status: dict[str, bool] = {}
 _last_checked: dict[str, float] = {}
 _force_check: set[str] = set()
