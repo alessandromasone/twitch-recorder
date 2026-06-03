@@ -976,6 +976,15 @@ _PREVIEW_TTL = 60
 _PREVIEW_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
+# Contesto SSL: usa il bundle di certifi (sempre presente con streamlink/requests)
+# così le fetch HTTPS del proxy funzionano anche se il sistema non ha ca-certificates.
+import ssl as _ssl
+try:
+    import certifi as _certifi
+    _SSL_CTX = _ssl.create_default_context(cafile=_certifi.where())
+except Exception:
+    _SSL_CTX = _ssl.create_default_context()
+
 
 def _sign_url(u: str) -> str:
     key = app.secret_key.encode() if isinstance(app.secret_key, str) else app.secret_key
@@ -1002,15 +1011,20 @@ def _resolve_preview(channel: str, platform: str) -> tuple[str | None, dict]:
         result = subprocess.run(["streamlink", url, "--json"],
                                 capture_output=True, timeout=20)
         if result.returncode != 0:
+            logger.info("Preview %s: streamlink rc=%s (probabile offline) — %s",
+                        channel, result.returncode,
+                        (result.stderr or b"").decode("utf-8", "replace")[-160:].strip())
             return None, {}
         info = json.loads(result.stdout or b"{}")
     except Exception as exc:
-        logger.debug("Preview resolve %s: %s", channel, exc)
+        logger.warning("Preview resolve %s: %s", channel, exc)
         return None, {}
     streams = info.get("streams") or {}
     if not streams:
+        logger.info("Preview %s: nessuno stream nel JSON di streamlink", channel)
         return None, {}
-    # Preferenza: qualità scelta → best → primo stream con URL
+    # Preferenza: qualità scelta → best → primo stream con URL.
+    # Per ogni candidato accetta sia "url" (variante) sia "master" (playlist madre).
     candidates = []
     if quality in streams:
         candidates.append(streams[quality])
@@ -1018,17 +1032,23 @@ def _resolve_preview(channel: str, platform: str) -> tuple[str | None, dict]:
         candidates.append(streams["best"])
     candidates += list(streams.values())
     for s in candidates:
-        if isinstance(s, dict) and s.get("url"):
+        if not isinstance(s, dict):
+            continue
+        stream_url = s.get("url") or s.get("master")
+        if stream_url:
             headers = s.get("headers") or {}
-            _preview_cache[channel] = {"url": s["url"], "headers": headers, "ts": now}
-            return s["url"], headers
+            _preview_cache[channel] = {"url": stream_url, "headers": headers, "ts": now}
+            return stream_url, headers
+    logger.info("Preview %s: streams presenti ma senza URL utilizzabile (chiavi: %s)",
+                channel, list(streams.keys())[:6])
     return None, {}
 
 
 def _open_remote(url: str, headers: dict, timeout: int = 15):
     h = {"User-Agent": _PREVIEW_UA}
     h.update(headers or {})
-    return urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout)
+    return urllib.request.urlopen(urllib.request.Request(url, headers=h),
+                                  timeout=timeout, context=_SSL_CTX)
 
 
 def _proxy_link(abs_url: str, channel: str, platform: str) -> str:
