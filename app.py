@@ -916,15 +916,16 @@ def preview_recording(filename):
     file_size = os.path.getsize(path)
     range_header = request.headers.get("Range")
 
-    mime = mimetypes.guess_type(safe)[0]
-    if mime is None:
-        ext = os.path.splitext(safe)[1].lower()
-        mime_map = {
-            ".ts": "video/mp2t", ".mp4": "video/mp4",
-            ".mkv": "video/x-matroska", ".webm": "video/webm",
-            ".flv": "video/x-flv", ".avi": "video/x-msvideo",
-        }
-        mime = mime_map.get(ext, "application/octet-stream")
+    # Per le estensioni video usiamo SEMPRE il mime corretto: mimetypes.guess_type
+    # su molti sistemi mappa ".ts" a un tipo errato (es. Qt Linguist/TypeScript).
+    ext = os.path.splitext(safe)[1].lower()
+    mime_map = {
+        ".ts": "video/mp2t", ".mp4": "video/mp4",
+        ".mkv": "video/x-matroska", ".webm": "video/webm",
+        ".flv": "video/x-flv", ".avi": "video/x-msvideo",
+        ".mov": "video/quicktime",
+    }
+    mime = mime_map.get(ext) or mimetypes.guess_type(safe)[0] or "application/octet-stream"
 
     if range_header:
         m = re.search(r"bytes=(\d+)-(\d*)", range_header)
@@ -964,197 +965,6 @@ def preview_recording(filename):
 
     return Response(gen_full(), status=200, mimetype=mime,
                     headers={"Content-Length": str(file_size), "Accept-Ranges": "bytes"})
-
-
-# ─── Anteprima live (proxy HLS) ───────────────────────────────────────────────
-# Il browser riproduce lo stream live con hls.js. L'URL HLS viene ricavato da
-# streamlink (--json), poi inoltrato da un proxy lato server (nessun re-encoding)
-# per evitare problemi di CORS. URL cachato ~60s, segmenti firmati (anti-SSRF).
-
-_preview_cache: dict[str, dict] = {}
-_PREVIEW_TTL = 60
-_PREVIEW_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-               "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
-
-# Contesto SSL: usa il bundle di certifi (sempre presente con streamlink/requests)
-# così le fetch HTTPS del proxy funzionano anche se il sistema non ha ca-certificates.
-import ssl as _ssl
-try:
-    import certifi as _certifi
-    _SSL_CTX = _ssl.create_default_context(cafile=_certifi.where())
-except Exception:
-    _SSL_CTX = _ssl.create_default_context()
-
-
-def _sign_url(u: str) -> str:
-    key = app.secret_key.encode() if isinstance(app.secret_key, str) else app.secret_key
-    return hmac.new(key, u.encode(), hashlib.sha256).hexdigest()[:24]
-
-
-def _verify_url(u: str, sig: str) -> bool:
-    try:
-        return hmac.compare_digest(_sign_url(u), sig or "")
-    except Exception:
-        return False
-
-
-def _resolve_preview(channel: str, platform: str) -> tuple[str | None, dict]:
-    """Ricava l'URL HLS della live tramite streamlink --json. Cache ~60s."""
-    now = time.time()
-    c = _preview_cache.get(channel)
-    if c and now - c["ts"] < _PREVIEW_TTL:
-        return c["url"], c["headers"]
-    quality = next((ch.get("quality", STREAM_QUALITY)
-                    for ch in _channels if ch.get("name") == channel), STREAM_QUALITY)
-    url = _platform_url(platform, channel)
-    try:
-        result = subprocess.run(["streamlink", url, "--json"],
-                                capture_output=True, timeout=20)
-        if result.returncode != 0:
-            logger.info("Preview %s: streamlink rc=%s (probabile offline) — %s",
-                        channel, result.returncode,
-                        (result.stderr or b"").decode("utf-8", "replace")[-160:].strip())
-            return None, {}
-        info = json.loads(result.stdout or b"{}")
-    except Exception as exc:
-        logger.warning("Preview resolve %s: %s", channel, exc)
-        return None, {}
-    streams = info.get("streams") or {}
-    if not streams:
-        logger.info("Preview %s: nessuno stream nel JSON di streamlink", channel)
-        return None, {}
-    # Preferenza: qualità scelta → best → primo stream con URL.
-    # Per ogni candidato accetta sia "url" (variante) sia "master" (playlist madre).
-    candidates = []
-    if quality in streams:
-        candidates.append(streams[quality])
-    if "best" in streams:
-        candidates.append(streams["best"])
-    candidates += list(streams.values())
-    for s in candidates:
-        if not isinstance(s, dict):
-            continue
-        stream_url = s.get("url") or s.get("master")
-        if stream_url:
-            headers = s.get("headers") or {}
-            _preview_cache[channel] = {"url": stream_url, "headers": headers, "ts": now}
-            return stream_url, headers
-    logger.info("Preview %s: streams presenti ma senza URL utilizzabile (chiavi: %s)",
-                channel, list(streams.keys())[:6])
-    return None, {}
-
-
-def _open_remote(url: str, headers: dict, timeout: int = 15):
-    h = {"User-Agent": _PREVIEW_UA}
-    h.update(headers or {})
-    return urllib.request.urlopen(urllib.request.Request(url, headers=h),
-                                  timeout=timeout, context=_SSL_CTX)
-
-
-def _proxy_link(abs_url: str, channel: str, platform: str) -> str:
-    path = urllib.parse.urlparse(abs_url).path.lower()
-    sig = _sign_url(abs_url)
-    if path.endswith(".m3u8"):
-        return "/api/preview.m3u8?" + urllib.parse.urlencode(
-            {"src": abs_url, "s": sig, "room": channel, "platform": platform})
-    return "/api/preview_seg?" + urllib.parse.urlencode({"u": abs_url, "s": sig, "room": channel})
-
-
-def _rewrite_m3u8(text: str, base_url: str, channel: str, platform: str) -> str:
-    out = []
-    for line in text.splitlines():
-        s = line.strip()
-        if not s:
-            out.append(line)
-            continue
-        if s.startswith("#"):
-            def _repl(m):
-                abs_u = urllib.parse.urljoin(base_url, m.group(1))
-                return 'URI="%s"' % _proxy_link(abs_u, channel, platform)
-            out.append(re.sub(r'URI="([^"]+)"', _repl, line))
-        else:
-            out.append(_proxy_link(urllib.parse.urljoin(base_url, s), channel, platform))
-    return "\n".join(out)
-
-
-@app.route("/api/preview_info", methods=["POST"])
-def api_preview_info():
-    data = request.get_json(silent=True) or {}
-    platform = _norm_platform(data.get("platform"))
-    channel = _clean_name(platform, data.get("channel") or data.get("room") or "")
-    if not channel:
-        return jsonify({"ok": False, "msg": "Canale non valido."}), 400
-    url, _ = _resolve_preview(channel, platform)
-    if not url:
-        return jsonify({"ok": False, "msg": "Stream non disponibile (canale offline)."})
-    src = "/api/preview.m3u8?" + urllib.parse.urlencode({"room": channel, "platform": platform})
-    return jsonify({"ok": True, "src": src})
-
-
-@app.route("/api/preview.m3u8")
-def api_preview_m3u8():
-    platform = _norm_platform(request.args.get("platform"))
-    channel = _clean_name(platform, request.args.get("room", ""))
-    src = request.args.get("src")
-
-    if src:
-        if not _verify_url(src, request.args.get("s", "")):
-            abort(403)
-        base = src
-        headers = (_preview_cache.get(channel) or {}).get("headers", {})
-    else:
-        base, headers = _resolve_preview(channel, platform)
-        if not base:
-            abort(404)
-
-    try:
-        with _open_remote(base, headers) as resp:
-            raw = resp.read()
-            final_url = resp.geturl() or base
-    except Exception as exc:
-        logger.warning("Preview m3u8 %s: %s", channel, exc)
-        abort(502)
-
-    rewritten = _rewrite_m3u8(raw.decode("utf-8", errors="replace"), final_url, channel, platform)
-    return Response(rewritten, mimetype="application/vnd.apple.mpegurl",
-                    headers={"Cache-Control": "no-store"})
-
-
-@app.route("/api/preview_seg")
-def api_preview_seg():
-    u = request.args.get("u", "")
-    if not u or not _verify_url(u, request.args.get("s", "")):
-        abort(403)
-    if not (u.startswith("http://") or u.startswith("https://")):
-        abort(400)
-    channel = _clean_name(DEFAULT_PLATFORM, request.args.get("room", ""))
-    headers = (_preview_cache.get(channel) or {}).get("headers", {})
-    try:
-        resp = _open_remote(u, headers, timeout=20)
-    except Exception as exc:
-        logger.debug("Preview seg %s: %s", channel, exc)
-        abort(502)
-
-    path = urllib.parse.urlparse(u).path.lower()
-    ctype = ("video/mp2t" if path.endswith(".ts")
-             else "video/mp4" if path.endswith((".m4s", ".mp4"))
-             else "application/vnd.apple.mpegurl" if path.endswith(".m3u8")
-             else resp.headers.get("Content-Type", "application/octet-stream"))
-
-    def gen():
-        try:
-            while True:
-                chunk = resp.read(65536)
-                if not chunk:
-                    break
-                yield chunk
-        finally:
-            try:
-                resp.close()
-            except Exception:
-                pass
-
-    return Response(gen(), mimetype=ctype, headers={"Cache-Control": "no-store"})
 
 
 @app.route("/delete_recording", methods=["POST"])
