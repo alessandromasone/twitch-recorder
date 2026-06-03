@@ -409,7 +409,7 @@
     else {
       rl.innerHTML = d.recordings.map(f => {
         const del=f.in_use?'<div class="rec-btn" style="opacity:.3;cursor:not-allowed" title="In registrazione"><i class="bi bi-lock-fill"></i></div>':`<div class="rec-btn del" onclick="confirmDeleteFile('${esc(f.name)}')"><i class="bi bi-trash3"></i></div>`;
-        const play=f.in_use?'':`<div class="rec-btn" onclick="openRecording('${esc(f.name)}')" title="Riproduci"><i class="bi bi-play-circle"></i></div>`;
+        const play=`<div class="rec-btn" onclick="openRecording('${esc(f.name)}',${f.in_use?'true':'false'})" title="${f.in_use?'Riproduci (in corso)':'Riproduci'}"><i class="bi bi-play-circle"></i></div>`;
         const rt=f.in_use?'<span class="badge-sm badge-rec" style="margin-left:6px;font-size:.55rem"><span class="dot-rec" style="width:4px;height:4px"></span>REC</span>':'';
         return `<div class="rec-item"><div class="rec-info"><span class="rec-name">${esc(f.name)}${rt}</span><span class="rec-meta">${f.size_human} &middot; ${f.modified}</span></div><div class="rec-actions">${play}<div class="rec-btn"><a href="/recordings/${encodeURIComponent(f.name)}" download><i class="bi bi-download"></i></a></div>${del}</div></div>`;
       }).join('');
@@ -453,16 +453,17 @@
   let _mts=null;
   function _previewStatus(text,show){const s=document.getElementById("previewStatus");document.getElementById("previewStatusText").textContent=text||"";s.style.display=show?"flex":"none";}
   function _destroyPlayer(){ if(_mts){try{_mts.destroy();}catch{} _mts=null;} }
-  window.openRecording=(filename)=>{
+  window.openRecording=(filename, live)=>{
     const modal=document.getElementById("previewModal"), vid=document.getElementById("previewVideo");
-    document.getElementById("previewTitle").textContent=filename;
+    document.getElementById("previewTitle").textContent=filename+(live?"  •  in corso":"");
     modal.classList.add("open"); _previewStatus("Caricamento…",true);
     _destroyPlayer();
     try{vid.pause();vid.removeAttribute("src");vid.load();}catch{}
     const url="/preview/"+encodeURIComponent(filename);
     const ext=(filename.split(".").pop()||"").toLowerCase();
     if(ext==="ts" && window.mpegts && mpegts.isSupported()){
-      _mts=mpegts.createPlayer({type:"mpegts", isLive:false, url}, {lazyLoad:false});
+      _mts=mpegts.createPlayer({type:"mpegts", isLive:false, url},
+                               {lazyLoad:false, lazyLoadMaxDuration:0});
       _mts.attachMediaElement(vid);
       _mts.on(mpegts.Events.ERROR,()=>{_previewStatus("Impossibile riprodurre nel browser — usa il download.",true);});
       _mts.on(mpegts.Events.MEDIA_INFO,()=>{_previewStatus("",false);});
