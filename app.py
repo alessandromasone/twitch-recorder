@@ -4,6 +4,8 @@ Registra automaticamente stream Twitch quando vanno online.
 """
 
 import csv
+import hashlib
+import hmac
 import io
 import json
 import os
@@ -22,6 +24,7 @@ import random
 import queue
 import urllib.request
 import urllib.error
+import urllib.parse
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -71,6 +74,51 @@ QUALITY_OPTIONS = [
 
 _VIDEO_EXTS = {".ts", ".mp4", ".mkv", ".flv", ".avi", ".mov", ".webm"}
 
+# ── Piattaforme supportate (via streamlink) ─────────────────────────────────
+# {name} = nome del canale. La registrazione usa sempre streamlink → file .ts.
+DEFAULT_PLATFORM = "twitch"
+PLATFORMS: dict[str, dict] = {
+    "twitch":  {"label": "Twitch",  "url": "https://twitch.tv/{name}"},
+    "kick":    {"label": "Kick",    "url": "https://kick.com/{name}"},
+    "youtube": {"label": "YouTube", "url": "https://www.youtube.com/@{name}/live"},
+}
+
+
+def _norm_platform(platform: str | None) -> str:
+    p = (platform or "").strip().lower()
+    return p if p in PLATFORMS else DEFAULT_PLATFORM
+
+
+def _platform_url(platform: str, name: str) -> str:
+    p = PLATFORMS.get(_norm_platform(platform), PLATFORMS[DEFAULT_PLATFORM])
+    return p["url"].format(name=name)
+
+
+def _clean_name(platform: str, raw: str) -> str:
+    """Estrae e ripulisce il nome canale (anche se viene incollato un URL)."""
+    raw = (raw or "").strip()
+    for host in ("twitch.tv/", "kick.com/", "youtube.com/"):
+        if host in raw:
+            raw = raw.split(host)[-1]
+            break
+    raw = raw.split("?")[0].split("#")[0]
+    if "/" in raw:
+        segs = [s for s in raw.rstrip("/").split("/") if s and s != "live"]
+        if segs:
+            raw = segs[-1]
+    raw = raw.lstrip("@")
+    name = re.sub(r"[^A-Za-z0-9_.-]", "", raw)
+    if _norm_platform(platform) in ("twitch", "kick"):
+        name = name.lower()
+    return name
+
+
+def _platform_of(channel: str) -> str:
+    for ch in _channels:
+        if ch.get("name") == channel:
+            return _norm_platform(ch.get("platform"))
+    return DEFAULT_PLATFORM
+
 # ─── Logging ──────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
@@ -102,6 +150,7 @@ def _load_channels() -> list[dict]:
                 for ch in data:
                     if "quality" not in ch:
                         ch["quality"] = STREAM_QUALITY
+                    ch["platform"] = _norm_platform(ch.get("platform"))
                     ch.pop("online", None)
                 return data
         except (json.JSONDecodeError, OSError) as exc:
@@ -119,10 +168,10 @@ def _save_channels(data: list[dict]) -> None:
         logger.error("Impossibile salvare %s: %s", CHANNELS_FILE, exc)
 
 
-def _resolve_quality(channel_name: str, preferred: str) -> str:
+def _resolve_quality(channel_name: str, preferred: str, platform: str = DEFAULT_PLATFORM) -> str:
     try:
         result = subprocess.run(
-            ["streamlink", f"https://twitch.tv/{channel_name}", "--json"],
+            ["streamlink", _platform_url(platform, channel_name), "--json"],
             capture_output=True, timeout=15,
         )
         if result.returncode != 0:
@@ -154,11 +203,11 @@ def _resolve_quality(channel_name: str, preferred: str) -> str:
         return preferred
 
 
-def _is_channel_online(channel_name: str) -> tuple[bool, bool]:
+def _is_channel_online(channel_name: str, platform: str = DEFAULT_PLATFORM) -> tuple[bool, bool]:
     """Ritorna (is_online, is_certain). is_certain=False su errori/timeout."""
     try:
         result = subprocess.run(
-            ["streamlink", f"https://twitch.tv/{channel_name}", "--json"],
+            ["streamlink", _platform_url(platform, channel_name), "--json"],
             capture_output=True, timeout=15,
         )
         is_online = result.returncode == 0 and b'"streams"' in result.stdout
@@ -290,7 +339,8 @@ def _tg_escape_html(text: str) -> str:
 
 
 def _notify_telegram(event: str, channel: str, message: str) -> None:
-    channel_url = f"https://twitch.tv/{channel}"
+    platform = _platform_of(channel)
+    channel_url = _platform_url(platform, channel)
     base_api = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
     safe_ch = _tg_escape_html(channel)
     link = f'<a href="{channel_url}">{safe_ch}</a>'
@@ -298,7 +348,8 @@ def _notify_telegram(event: str, channel: str, message: str) -> None:
     if event == "online":
         caption = f"{link} — 🟢 Online"
 
-        if TELEGRAM_PHOTO:
+        # La thumbnail pubblica è disponibile solo per Twitch
+        if TELEGRAM_PHOTO and platform == "twitch":
             photo_url = f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{channel}-640x360.jpg"
             payload = json.dumps({
                 "chat_id": TELEGRAM_CHAT,
@@ -371,12 +422,13 @@ class Recorder:
     __slots__ = (
         "channel_name", "process", "output_path",
         "is_recording", "stop_requested", "_lock", "_thread", "_log_fh",
-        "started_at", "quality", "_split_triggered",
+        "started_at", "quality", "_split_triggered", "platform",
     )
 
-    def __init__(self, channel_name: str, quality: str = "best"):
+    def __init__(self, channel_name: str, quality: str = "best", platform: str = DEFAULT_PLATFORM):
         self.channel_name = channel_name
         self.quality = quality
+        self.platform = _norm_platform(platform)
         self.process: subprocess.Popen | None = None
         self.output_path: str | None = None
         self.is_recording = False
@@ -426,15 +478,17 @@ class Recorder:
         error_start: float | None = None
 
         while not self.stop_requested:
-            resolved = _resolve_quality(self.channel_name, self.quality)
+            resolved = _resolve_quality(self.channel_name, self.quality, self.platform)
             self._split_triggered = False
 
             self.output_path = os.path.join(
                 RECORDINGS_DIR, _generate_filename(self.channel_name),
             )
-            cmd = [
-                "streamlink", "--twitch-disable-ads",
-                f"https://twitch.tv/{self.channel_name}",
+            cmd = ["streamlink"]
+            if self.platform == "twitch":
+                cmd.append("--twitch-disable-ads")
+            cmd += [
+                _platform_url(self.platform, self.channel_name),
                 resolved, "-o", self.output_path,
             ]
             log_path = os.path.join(RECORDINGS_DIR, f".{self.channel_name}.log")
@@ -500,7 +554,7 @@ class Recorder:
             time.sleep(wait)
             if self.stop_requested:
                 return False
-            is_online, _ = _is_channel_online(self.channel_name)
+            is_online, _ = _is_channel_online(self.channel_name, self.platform)
             if is_online:
                 logger.info("✅ %s: stream ancora attivo, riprendo registrazione",
                             self.channel_name)
@@ -532,7 +586,8 @@ class Recorder:
 _lock = threading.Lock()
 _channels: list[dict] = _load_channels()
 _recorders: dict[str, Recorder] = {
-    ch["name"]: Recorder(ch["name"], ch.get("quality", STREAM_QUALITY))
+    ch["name"]: Recorder(ch["name"], ch.get("quality", STREAM_QUALITY),
+                         ch.get("platform", DEFAULT_PLATFORM))
     for ch in _channels
 }
 _online_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="online-check")
@@ -569,8 +624,12 @@ def _build_status_json() -> dict:
         for ch in _channels:
             rec = _recorders.get(ch["name"])
             lc = _last_checked.get(ch["name"], 0)
+            plat = _norm_platform(ch.get("platform"))
             ch_list.append({
                 "name": ch["name"],
+                "platform": plat,
+                "platform_label": PLATFORMS[plat]["label"],
+                "home_url": _platform_url(plat, ch["name"]),
                 "online": _online_status.get(ch["name"], False),
                 "is_recording": ch.get("is_recording", False),
                 "actually_recording": rec.is_recording if rec else False,
@@ -588,6 +647,7 @@ def _build_status_json() -> dict:
         "recordings": recordings,
         "disk": disk,
         "quality_options": QUALITY_OPTIONS,
+        "platforms": [{"key": k, "label": v["label"]} for k, v in PLATFORMS.items()],
         "config": {
             "reconnect_wait": RECONNECT_WAIT,
             "reconnect_tries": RECONNECT_TRIES,
@@ -654,7 +714,8 @@ def _monitor_loop() -> None:
                         f" ({len(priority)} prioritari)" if priority else "")
 
             futures = {
-                _online_pool.submit(_is_channel_online, ch["name"]): ch["name"]
+                _online_pool.submit(_is_channel_online, ch["name"],
+                                    _norm_platform(ch.get("platform"))): ch["name"]
                 for ch in active
             }
             results: dict[str, tuple[bool, bool]] = {}
@@ -767,10 +828,8 @@ def index():
 
     if request.method == "POST":
         action = request.form.get("action", "")
-        raw = request.form.get("channel", "").strip().lower()
-        if "twitch.tv/" in raw:
-            raw = raw.split("twitch.tv/")[-1].split("/")[0].split("?")[0]
-        channel_name = raw
+        platform = _norm_platform(request.form.get("platform"))
+        channel_name = _clean_name(platform, request.form.get("channel") or "")
         quality = request.form.get("quality", STREAM_QUALITY)
 
         if action == "add" and channel_name:
@@ -779,9 +838,9 @@ def index():
                     flash("Canale già presente.", "warning")
                 else:
                     entry = {"name": channel_name, "is_recording": True,
-                             "quality": quality}
+                             "quality": quality, "platform": platform}
                     _channels.append(entry)
-                    _recorders[channel_name] = Recorder(channel_name, quality)
+                    _recorders[channel_name] = Recorder(channel_name, quality, platform)
                     _save_channels(_channels)
                     _force_check.add(channel_name)
                     flash(f"{channel_name} aggiunto.", "success")
@@ -907,6 +966,177 @@ def preview_recording(filename):
                     headers={"Content-Length": str(file_size), "Accept-Ranges": "bytes"})
 
 
+# ─── Anteprima live (proxy HLS) ───────────────────────────────────────────────
+# Il browser riproduce lo stream live con hls.js. L'URL HLS viene ricavato da
+# streamlink (--json), poi inoltrato da un proxy lato server (nessun re-encoding)
+# per evitare problemi di CORS. URL cachato ~60s, segmenti firmati (anti-SSRF).
+
+_preview_cache: dict[str, dict] = {}
+_PREVIEW_TTL = 60
+_PREVIEW_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+
+
+def _sign_url(u: str) -> str:
+    key = app.secret_key.encode() if isinstance(app.secret_key, str) else app.secret_key
+    return hmac.new(key, u.encode(), hashlib.sha256).hexdigest()[:24]
+
+
+def _verify_url(u: str, sig: str) -> bool:
+    try:
+        return hmac.compare_digest(_sign_url(u), sig or "")
+    except Exception:
+        return False
+
+
+def _resolve_preview(channel: str, platform: str) -> tuple[str | None, dict]:
+    """Ricava l'URL HLS della live tramite streamlink --json. Cache ~60s."""
+    now = time.time()
+    c = _preview_cache.get(channel)
+    if c and now - c["ts"] < _PREVIEW_TTL:
+        return c["url"], c["headers"]
+    quality = next((ch.get("quality", STREAM_QUALITY)
+                    for ch in _channels if ch.get("name") == channel), STREAM_QUALITY)
+    url = _platform_url(platform, channel)
+    try:
+        result = subprocess.run(["streamlink", url, "--json"],
+                                capture_output=True, timeout=20)
+        if result.returncode != 0:
+            return None, {}
+        info = json.loads(result.stdout or b"{}")
+    except Exception as exc:
+        logger.debug("Preview resolve %s: %s", channel, exc)
+        return None, {}
+    streams = info.get("streams") or {}
+    if not streams:
+        return None, {}
+    # Preferenza: qualità scelta → best → primo stream con URL
+    candidates = []
+    if quality in streams:
+        candidates.append(streams[quality])
+    if "best" in streams:
+        candidates.append(streams["best"])
+    candidates += list(streams.values())
+    for s in candidates:
+        if isinstance(s, dict) and s.get("url"):
+            headers = s.get("headers") or {}
+            _preview_cache[channel] = {"url": s["url"], "headers": headers, "ts": now}
+            return s["url"], headers
+    return None, {}
+
+
+def _open_remote(url: str, headers: dict, timeout: int = 15):
+    h = {"User-Agent": _PREVIEW_UA}
+    h.update(headers or {})
+    return urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout)
+
+
+def _proxy_link(abs_url: str, channel: str, platform: str) -> str:
+    path = urllib.parse.urlparse(abs_url).path.lower()
+    sig = _sign_url(abs_url)
+    if path.endswith(".m3u8"):
+        return "/api/preview.m3u8?" + urllib.parse.urlencode(
+            {"src": abs_url, "s": sig, "room": channel, "platform": platform})
+    return "/api/preview_seg?" + urllib.parse.urlencode({"u": abs_url, "s": sig, "room": channel})
+
+
+def _rewrite_m3u8(text: str, base_url: str, channel: str, platform: str) -> str:
+    out = []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            out.append(line)
+            continue
+        if s.startswith("#"):
+            def _repl(m):
+                abs_u = urllib.parse.urljoin(base_url, m.group(1))
+                return 'URI="%s"' % _proxy_link(abs_u, channel, platform)
+            out.append(re.sub(r'URI="([^"]+)"', _repl, line))
+        else:
+            out.append(_proxy_link(urllib.parse.urljoin(base_url, s), channel, platform))
+    return "\n".join(out)
+
+
+@app.route("/api/preview_info", methods=["POST"])
+def api_preview_info():
+    data = request.get_json(silent=True) or {}
+    platform = _norm_platform(data.get("platform"))
+    channel = _clean_name(platform, data.get("channel") or data.get("room") or "")
+    if not channel:
+        return jsonify({"ok": False, "msg": "Canale non valido."}), 400
+    url, _ = _resolve_preview(channel, platform)
+    if not url:
+        return jsonify({"ok": False, "msg": "Stream non disponibile (canale offline)."})
+    src = "/api/preview.m3u8?" + urllib.parse.urlencode({"room": channel, "platform": platform})
+    return jsonify({"ok": True, "src": src})
+
+
+@app.route("/api/preview.m3u8")
+def api_preview_m3u8():
+    platform = _norm_platform(request.args.get("platform"))
+    channel = _clean_name(platform, request.args.get("room", ""))
+    src = request.args.get("src")
+
+    if src:
+        if not _verify_url(src, request.args.get("s", "")):
+            abort(403)
+        base = src
+        headers = (_preview_cache.get(channel) or {}).get("headers", {})
+    else:
+        base, headers = _resolve_preview(channel, platform)
+        if not base:
+            abort(404)
+
+    try:
+        with _open_remote(base, headers) as resp:
+            raw = resp.read()
+            final_url = resp.geturl() or base
+    except Exception as exc:
+        logger.warning("Preview m3u8 %s: %s", channel, exc)
+        abort(502)
+
+    rewritten = _rewrite_m3u8(raw.decode("utf-8", errors="replace"), final_url, channel, platform)
+    return Response(rewritten, mimetype="application/vnd.apple.mpegurl",
+                    headers={"Cache-Control": "no-store"})
+
+
+@app.route("/api/preview_seg")
+def api_preview_seg():
+    u = request.args.get("u", "")
+    if not u or not _verify_url(u, request.args.get("s", "")):
+        abort(403)
+    if not (u.startswith("http://") or u.startswith("https://")):
+        abort(400)
+    channel = _clean_name(DEFAULT_PLATFORM, request.args.get("room", ""))
+    headers = (_preview_cache.get(channel) or {}).get("headers", {})
+    try:
+        resp = _open_remote(u, headers, timeout=20)
+    except Exception as exc:
+        logger.debug("Preview seg %s: %s", channel, exc)
+        abort(502)
+
+    path = urllib.parse.urlparse(u).path.lower()
+    ctype = ("video/mp2t" if path.endswith(".ts")
+             else "video/mp4" if path.endswith((".m4s", ".mp4"))
+             else "application/vnd.apple.mpegurl" if path.endswith(".m3u8")
+             else resp.headers.get("Content-Type", "application/octet-stream"))
+
+    def gen():
+        try:
+            while True:
+                chunk = resp.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            try:
+                resp.close()
+            except Exception:
+                pass
+
+    return Response(gen(), mimetype=ctype, headers={"Cache-Control": "no-store"})
+
+
 @app.route("/delete_recording", methods=["POST"])
 def delete_recording():
     filename = request.form.get("filename", "")
@@ -975,12 +1205,13 @@ def api_stream():
 def api_export():
     fmt = request.args.get("format", "json").lower()
     with _lock:
-        data = [{"name": ch["name"], "quality": ch.get("quality", STREAM_QUALITY),
+        data = [{"name": ch["name"], "platform": _norm_platform(ch.get("platform")),
+                 "quality": ch.get("quality", STREAM_QUALITY),
                  "is_recording": ch.get("is_recording", False)} for ch in _channels]
 
     if fmt == "csv":
         output = io.StringIO()
-        writer = csv.DictWriter(output, fieldnames=["name", "quality", "is_recording"])
+        writer = csv.DictWriter(output, fieldnames=["name", "platform", "quality", "is_recording"])
         writer.writeheader()
         writer.writerows(data)
         return Response(output.getvalue(), mimetype="text/csv",
@@ -1012,20 +1243,23 @@ def api_import():
                 parsed = [parsed]
             for item in parsed:
                 if isinstance(item, str):
-                    rooms.append({"name": item, "quality": STREAM_QUALITY, "is_recording": True})
+                    rooms.append({"name": item, "platform": DEFAULT_PLATFORM,
+                                  "quality": STREAM_QUALITY, "is_recording": True})
                 elif isinstance(item, dict) and "name" in item:
                     rooms.append({
                         "name": item["name"],
+                        "platform": _norm_platform(item.get("platform")),
                         "quality": item.get("quality", STREAM_QUALITY),
                         "is_recording": bool(item.get("is_recording", True)),
                     })
         else:
             reader = csv.DictReader(io.StringIO(content))
             for row in reader:
-                name = row.get("name", "").strip().lower()
+                name = row.get("name", "").strip()
                 if name:
                     rooms.append({
                         "name": name,
+                        "platform": _norm_platform(row.get("platform")),
                         "quality": row.get("quality", STREAM_QUALITY),
                         "is_recording": str(row.get("is_recording", "true")).lower()
                             in ("true", "1", "yes"),
@@ -1034,14 +1268,15 @@ def api_import():
         with _lock:
             existing = {c["name"] for c in _channels}
             for room in rooms:
-                name = re.sub(r"[^a-z0-9_-]", "", room["name"].lower())
+                plat = _norm_platform(room.get("platform"))
+                name = _clean_name(plat, room["name"])
                 if not name or name in existing:
                     skipped += 1
                     continue
                 entry = {"name": name, "quality": room["quality"],
-                         "is_recording": room["is_recording"]}
+                         "is_recording": room["is_recording"], "platform": plat}
                 _channels.append(entry)
-                _recorders[name] = Recorder(name, room["quality"])
+                _recorders[name] = Recorder(name, room["quality"], plat)
                 _force_check.add(name)
                 existing.add(name)
                 imported += 1
@@ -1085,24 +1320,22 @@ def api_room_action():
     global _channels
     data = request.get_json(silent=True) or {}
     action = data.get("action", "")
-    raw = data.get("channel", "").strip().lower()
-    if "twitch.tv/" in raw:
-        raw = raw.split("twitch.tv/")[-1].strip("/").split("/")[0].split("?")[0]
-    channel_name = re.sub(r"[^a-z0-9_-]", "", raw)
+    platform = _norm_platform(data.get("platform"))
+    channel_name = _clean_name(platform, data.get("channel") or "")
     quality = data.get("quality", STREAM_QUALITY)
 
     if action == "add" and channel_name:
         with _lock:
             if any(c["name"] == channel_name for c in _channels):
-                return jsonify({"ok": False, "msg": "Canale già presente."})
+                return jsonify({"ok": False, "msg": "Canale già presente (nome unico tra le piattaforme)."})
             entry = {"name": channel_name, "is_recording": True,
-                     "quality": quality}
+                     "quality": quality, "platform": platform}
             _channels.append(entry)
-            _recorders[channel_name] = Recorder(channel_name, quality)
+            _recorders[channel_name] = Recorder(channel_name, quality, platform)
             _save_channels(_channels)
             _force_check.add(channel_name)
         _sse_broadcast("action")
-        return jsonify({"ok": True, "msg": f"{channel_name} aggiunto."})
+        return jsonify({"ok": True, "msg": f"{channel_name} aggiunto ({PLATFORMS[platform]['label']})."})
 
     elif action in ("pause", "resume") and channel_name:
         rec_to_stop = None

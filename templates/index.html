@@ -8,6 +8,7 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
   <style>
     :root {
       --tw: #9146ff; --tw-dim: #7c3aed; --tw-glow: rgba(145,70,255,.15);
@@ -155,6 +156,21 @@
     .toast-msg.warning { background: rgba(251,191,36,.15); color: #fbbf24; border: 1px solid rgba(251,191,36,.3); }
     .toast-msg.danger { background: rgba(239,68,68,.15); color: #ef4444; border: 1px solid rgba(239,68,68,.3); }
     @keyframes fadeIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:none} }
+    .plat-badge { font-size: .58rem; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: var(--tw-glow, rgba(145,70,255,.15)); color: var(--tw); border: 1px solid rgba(145,70,255,.3); text-transform: uppercase; letter-spacing: .3px; }
+    .preview-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.8); z-index: 3500; align-items: center; justify-content: center; padding: 16px; }
+    .preview-backdrop.open { display: flex; }
+    .preview-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; width: min(900px, 96vw); max-height: 92vh; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,.5); display: flex; flex-direction: column; }
+    .preview-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+    .preview-head .ttl { font-weight: 600; font-size: .9rem; display: flex; align-items: center; gap: 8px; }
+    .preview-close { background: var(--surface3); border: 1px solid var(--border); color: var(--text1); border-radius: 8px; width: 32px; height: 32px; cursor: pointer; font-size: 1rem; display: inline-flex; align-items: center; justify-content: center; }
+    .preview-close:hover { background: var(--border); }
+    .preview-body { position: relative; background: #000; aspect-ratio: 16/9; }
+    .preview-body video { width: 100%; height: 100%; display: block; background: #000; }
+    .preview-status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--text2); font-size: .85rem; text-align: center; padding: 16px; }
+    .preview-spinner { width: 34px; height: 34px; border: 3px solid var(--border); border-top-color: var(--tw); border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .preview-unmute { position: absolute; left: 50%; bottom: 54px; transform: translateX(-50%); z-index: 5; display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 999px; border: none; background: var(--tw); color: #fff; font-family: inherit; font-weight: 600; font-size: .82rem; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+    .preview-note { padding: 8px 14px; font-size: .72rem; color: var(--text3); border-top: 1px solid var(--border); }
   </style>
 </head>
 <body>
@@ -197,6 +213,21 @@
   </div>
 </div>
 
+<div class="preview-backdrop" id="previewModal">
+  <div class="preview-box">
+    <div class="preview-head">
+      <div class="ttl"><span class="dot-rec" style="background:var(--rec)"></span><span id="previewTitle">Anteprima</span></div>
+      <button type="button" class="preview-close" onclick="closePreview()"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="preview-body">
+      <video id="previewVideo" playsinline controls></video>
+      <button type="button" id="previewUnmute" class="preview-unmute" onclick="unmutePreview()" style="display:none"><i class="bi bi-volume-mute-fill"></i> Attiva audio</button>
+      <div class="preview-status" id="previewStatus"><div class="preview-spinner"></div><span id="previewStatusText">Connessione allo stream…</span></div>
+    </div>
+    <div class="preview-note">Anteprima live tramite proxy. La registrazione prosegue normalmente. Se il canale è offline l'anteprima non sarà disponibile.</div>
+  </div>
+</div>
+
 <div class="shell">
   <div class="hdr">
     <div class="hdr-brand"><i class="bi bi-camera-video-fill"></i><span>Twitch Recorder</span></div>
@@ -228,7 +259,8 @@
 
   <div class="add-bar">
     <form id="addForm">
-      <input type="text" id="addChannel" placeholder="Nome canale o URL Twitch…" required autocomplete="off">
+      <select id="addPlatform" title="Piattaforma"></select>
+      <input type="text" id="addChannel" placeholder="Nome canale o URL…" required autocomplete="off">
       <select id="addQuality">
         <option value="best">best</option>
         <option value="1080p60">1080p60</option>
@@ -277,8 +309,9 @@
 (() => {
   "use strict";
   let qualityOpts = [], currentSort = localStorage.getItem("tr-sort") || "default";
+  let platforms = [];
   let lastData = null, evtSource = null, reconnectTimer = null;
-  let _pendingRemove = "", _pendingDelete = "";
+  let _pendingRemove = "", _pendingRemovePlat = "", _pendingDelete = "";
 
   const html = document.documentElement;
   const saved = localStorage.getItem("tr-theme");
@@ -349,6 +382,12 @@
     fill.style.width = d.disk.used_pct+"%";
     fill.style.background = d.disk.used_pct>90?"var(--rec)":d.disk.used_pct>75?"#fbbf24":"var(--tw)";
 
+    platforms = d.platforms||platforms;
+    const platSel = document.getElementById("addPlatform");
+    if (platSel && !platSel.options.length && platforms.length) {
+      platforms.forEach(p => { const o=document.createElement("option"); o.value=p.key; o.textContent=p.label; platSel.appendChild(o); });
+    }
+
     qualityOpts = d.quality_options||[];
 
     const sorted = sortChannels(d.channels);
@@ -359,9 +398,11 @@
         const online = ch.online?'<span class="badge-sm badge-online"><span class="dot-rec" style="background:var(--online);animation:none;width:5px;height:5px"></span>Online</span>':'<span class="badge-sm badge-offline">Offline</span>';
         let rb; if(ch.actually_recording){rb=`<span class="badge-sm badge-rec"><span class="dot-rec"></span>REC</span>`;if(ch.uptime)rb+=`<span class="uptime-tag">${uptime(ch.uptime)}</span>`;}else if(ch.is_recording){rb='<span class="badge-sm badge-waiting">In attesa</span>';}else{rb='<span class="badge-sm badge-paused">Pausa</span>';}
         const qo=qualityOpts.map(q=>`<option value="${q}"${q===ch.quality?' selected':''}>${q}</option>`).join('');
-        const tb=ch.is_recording?`<button class="ch-btn btn-pause" onclick="chAction('pause','${esc(ch.name)}')"><i class="bi bi-pause-fill"></i></button>`:`<button class="ch-btn btn-play" onclick="chAction('resume','${esc(ch.name)}')"><i class="bi bi-play-fill"></i></button>`;
+        const tb=ch.is_recording?`<button class="ch-btn btn-pause" onclick="chAction('pause','${esc(ch.name)}','${esc(ch.platform)}')"><i class="bi bi-pause-fill"></i></button>`:`<button class="ch-btn btn-play" onclick="chAction('resume','${esc(ch.name)}','${esc(ch.platform)}')"><i class="bi bi-play-fill"></i></button>`;
+        const plat=`<span class="plat-badge">${esc(ch.platform_label||ch.platform||'')}</span>`;
+        const pv=`<button class="ch-btn" onclick="openPreview('${esc(ch.name)}','${esc(ch.platform)}')" title="Anteprima live"><i class="bi bi-eye-fill"></i></button>`;
         const lc=ch.last_checked!=null?`<span class="uptime-tag" title="Ultimo check">${uptime(ch.last_checked)} fa</span>`:'<span class="uptime-tag" style="color:var(--rec)">mai</span>';
-        return `<div class="ch-card" data-name="${esc(ch.name)}"><div class="ch-top"><div class="ch-name-row"><a href="https://twitch.tv/${esc(ch.name)}" target="_blank" class="ch-name">${esc(ch.name)}</a><div class="ch-badges">${online}${rb}${lc}</div></div></div><div class="ch-bottom"><div class="ch-quality-row"><span class="ch-quality-label">Qualità:</span><select class="ch-quality-select" onchange="setQuality('${esc(ch.name)}',this.value)">${qo}</select></div><div class="ch-actions">${tb}<button class="ch-btn" onclick="forceCheck('${esc(ch.name)}')" title="Controlla ora"><i class="bi bi-arrow-clockwise"></i></button><button class="ch-btn btn-del" onclick="confirmRemoveCh('${esc(ch.name)}')"><i class="bi bi-trash3"></i></button></div></div></div>`;
+        return `<div class="ch-card" data-name="${esc(ch.name)}"><div class="ch-top"><div class="ch-name-row"><a href="${esc(ch.home_url||('https://twitch.tv/'+ch.name))}" target="_blank" class="ch-name">${esc(ch.name)}</a><div class="ch-badges">${plat}${online}${rb}${lc}</div></div></div><div class="ch-bottom"><div class="ch-quality-row"><span class="ch-quality-label">Qualità:</span><select class="ch-quality-select" onchange="setQuality('${esc(ch.name)}',this.value,'${esc(ch.platform)}')">${qo}</select></div><div class="ch-actions">${pv}${tb}<button class="ch-btn" onclick="forceCheck('${esc(ch.name)}','${esc(ch.platform)}')" title="Controlla ora"><i class="bi bi-arrow-clockwise"></i></button><button class="ch-btn btn-del" onclick="confirmRemoveCh('${esc(ch.name)}','${esc(ch.platform)}')"><i class="bi bi-trash3"></i></button></div></div></div>`;
       }).join('');
     }
 
@@ -396,20 +437,61 @@
   document.getElementById("addForm").addEventListener("submit", async e => {
     e.preventDefault();
     const ch=document.getElementById("addChannel").value.trim(), q=document.getElementById("addQuality").value;
+    const plat=document.getElementById("addPlatform").value||"twitch";
     if(!ch)return;
-    const r=await api("/api/room",{action:"add",channel:ch,quality:q});
+    const r=await api("/api/room",{action:"add",channel:ch,quality:q,platform:plat});
     toast(r.msg||(r.ok?"Aggiunto":"Errore"),r.ok?"success":"warning");
     if(r.ok)document.getElementById("addChannel").value="";
   });
 
-  window.chAction=async(action,name)=>api("/api/room",{action,channel:name});
-  window.setQuality=async(name,q)=>api("/api/room",{action:"set_quality",channel:name,quality:q});
+  window.chAction=async(action,name,platform)=>api("/api/room",{action,channel:name,platform});
+  window.setQuality=async(name,q,platform)=>api("/api/room",{action:"set_quality",channel:name,quality:q,platform});
   window.bulkAction=async(action)=>api("/api/room",{action});
-  window.forceCheck=async name=>{await api("/api/check",{channel:name});toast("Check richiesto");};
+  window.forceCheck=async(name,platform)=>{await api("/api/check",{channel:name});toast("Check richiesto");};
   window.toggleCheckPaused=async()=>{const r=await api("/api/toggle_check_paused",{});toast(`Check canali in pausa: ${r.check_paused_rooms?'ON':'OFF'}`);};
 
-  window.confirmRemoveCh=name=>{_pendingRemove=name;document.getElementById("confirmChName").textContent=name;document.getElementById("confirmRemove").classList.add("open");};
-  document.getElementById("confirmRemoveBtn").addEventListener("click",async()=>{if(!_pendingRemove)return;await api("/api/room",{action:"remove",channel:_pendingRemove});_pendingRemove="";closeConfirm("confirmRemove");});
+  // ── Anteprima live ──
+  let _hls=null;
+  function _previewStatus(text,show){const s=document.getElementById("previewStatus");document.getElementById("previewStatusText").textContent=text||"";s.style.display=show?"flex":"none";}
+  function _destroyHls(){ if(_hls){try{_hls.destroy();}catch{} _hls=null;} }
+  function _showUnmute(show){document.getElementById("previewUnmute").style.display=show?"inline-flex":"none";}
+  window.unmutePreview=()=>{const v=document.getElementById("previewVideo");v.muted=false;v.volume=1;v.play().catch(()=>{});_showUnmute(false);};
+  async function _startPlayback(vid){
+    // Prova con audio attivo (la preview parte da un click → spesso consentito);
+    // se il browser blocca l'autoplay con suono, riparte muto e mostra "Attiva audio".
+    _previewStatus("",false);
+    vid.muted=false; vid.volume=1;
+    try { await vid.play(); _showUnmute(false); }
+    catch(e){ vid.muted=true; try{ await vid.play(); }catch{} _showUnmute(true); }
+  }
+  window.openPreview=async(name,platform)=>{
+    const modal=document.getElementById("previewModal"), vid=document.getElementById("previewVideo");
+    document.getElementById("previewTitle").textContent=name;
+    modal.classList.add("open"); _showUnmute(false); _previewStatus("Connessione allo stream…",true);
+    let info;
+    try{ info=await api("/api/preview_info",{channel:name,platform}); }catch{ info={ok:false,msg:"Errore di rete"}; }
+    if(!info||!info.ok){ _previewStatus(info&&info.msg?info.msg:"Anteprima non disponibile",true); return; }
+    const src=info.src; _destroyHls();
+    if(window.Hls&&Hls.isSupported()){
+      _hls=new Hls({lowLatencyMode:true,maxBufferLength:10,liveSyncDuration:3,manifestLoadingMaxRetry:2});
+      _hls.on(Hls.Events.MANIFEST_PARSED,()=>{_startPlayback(vid);});
+      _hls.on(Hls.Events.ERROR,(e,data)=>{ if(data&&data.fatal){ _previewStatus("Stream non riproducibile (CORS o offline).",true); } });
+      _hls.loadSource(src); _hls.attachMedia(vid);
+    } else if(vid.canPlayType("application/vnd.apple.mpegurl")){
+      vid.src=src; vid.addEventListener("loadedmetadata",()=>{_startPlayback(vid);},{once:true});
+    } else { _previewStatus("Il browser non supporta HLS.",true); }
+  };
+  window.closePreview=()=>{
+    const vid=document.getElementById("previewVideo");
+    try{vid.pause();vid.removeAttribute("src");vid.load();}catch{}
+    _destroyHls(); _showUnmute(false);
+    document.getElementById("previewModal").classList.remove("open");
+  };
+  document.getElementById("previewModal").addEventListener("click",e=>{if(e.target.id==="previewModal")closePreview();});
+  document.addEventListener("keydown",e=>{if(e.key==="Escape"&&document.getElementById("previewModal").classList.contains("open"))closePreview();});
+
+  window.confirmRemoveCh=(name,platform)=>{_pendingRemove=name;_pendingRemovePlat=platform;document.getElementById("confirmChName").textContent=name;document.getElementById("confirmRemove").classList.add("open");};
+  document.getElementById("confirmRemoveBtn").addEventListener("click",async()=>{if(!_pendingRemove)return;await api("/api/room",{action:"remove",channel:_pendingRemove,platform:_pendingRemovePlat});_pendingRemove="";closeConfirm("confirmRemove");});
 
   window.confirmDeleteFile=name=>{_pendingDelete=name;document.getElementById("confirmFileName").textContent=name;document.getElementById("confirmDelete").classList.add("open");};
   document.getElementById("confirmDeleteBtn").addEventListener("click",async()=>{if(!_pendingDelete)return;const r=await api("/api/delete_recording",{filename:_pendingDelete});if(!r.ok)toast(r.msg||"Errore","danger");_pendingDelete="";closeConfirm("confirmDelete");});
