@@ -166,7 +166,7 @@
     .preview-close:hover { background: var(--border); }
     .preview-body { position: relative; background: #000; aspect-ratio: 16/9; }
     .preview-body video { width: 100%; height: 100%; display: block; background: #000; }
-    .preview-status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--text2); font-size: .85rem; text-align: center; padding: 16px; }
+    .preview-status { pointer-events: none; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--text2); font-size: .85rem; text-align: center; padding: 16px; }
     .preview-spinner { width: 34px; height: 34px; border: 3px solid var(--border); border-top-color: var(--tw); border-radius: 50%; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .preview-unmute { position: absolute; left: 50%; bottom: 54px; transform: translateX(-50%); z-index: 5; display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 999px; border: none; background: var(--tw); color: #fff; font-family: inherit; font-weight: 600; font-size: .82rem; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
@@ -223,7 +223,7 @@
       <video id="previewVideo" playsinline controls></video>
       <div class="preview-status" id="previewStatus"><div class="preview-spinner"></div><span id="previewStatusText">Caricamento…</span></div>
     </div>
-    <div class="preview-note">Riproduzione della registrazione. I file <code>.ts</code> vengono decodificati nel browser via mpegts.js; se non parte puoi sempre scaricare il file.</div>
+    <div class="preview-note" id="previewNote">Anteprima della registrazione in corso.</div>
   </div>
 </div>
 
@@ -398,9 +398,10 @@
         let rb; if(ch.actually_recording){rb=`<span class="badge-sm badge-rec"><span class="dot-rec"></span>REC</span>`;if(ch.uptime)rb+=`<span class="uptime-tag">${uptime(ch.uptime)}</span>`;}else if(ch.is_recording){rb='<span class="badge-sm badge-waiting">In attesa</span>';}else{rb='<span class="badge-sm badge-paused">Pausa</span>';}
         const qo=qualityOpts.map(q=>`<option value="${q}"${q===ch.quality?' selected':''}>${q}</option>`).join('');
         const tb=ch.is_recording?`<button class="ch-btn btn-pause" onclick="chAction('pause','${esc(ch.name)}','${esc(ch.platform)}')"><i class="bi bi-pause-fill"></i></button>`:`<button class="ch-btn btn-play" onclick="chAction('resume','${esc(ch.name)}','${esc(ch.platform)}')"><i class="bi bi-play-fill"></i></button>`;
+        const liveBtn=ch.actually_recording?`<button type="button" class="ch-btn btn-play" onclick="openLive('${esc(ch.name)}','${esc(ch.platform)}')" title="Guarda la diretta"><i class="bi bi-broadcast"></i> Guarda live</button>`:"";
         const plat=`<span class="plat-badge">${esc(ch.platform_label||ch.platform||'')}</span>`;
         const lc=ch.last_checked!=null?`<span class="uptime-tag" title="Ultimo check">${uptime(ch.last_checked)} fa</span>`:'<span class="uptime-tag" style="color:var(--rec)">mai</span>';
-        return `<div class="ch-card" data-name="${esc(ch.name)}"><div class="ch-top"><div class="ch-name-row"><a href="${esc(ch.home_url||('https://twitch.tv/'+ch.name))}" target="_blank" class="ch-name">${esc(ch.name)}</a><div class="ch-badges">${plat}${online}${rb}${lc}</div></div></div><div class="ch-bottom"><div class="ch-quality-row"><span class="ch-quality-label">Qualità:</span><select class="ch-quality-select" onchange="setQuality('${esc(ch.name)}',this.value,'${esc(ch.platform)}')">${qo}</select></div><div class="ch-actions">${tb}<button class="ch-btn" onclick="forceCheck('${esc(ch.name)}','${esc(ch.platform)}')" title="Controlla ora"><i class="bi bi-arrow-clockwise"></i></button><button class="ch-btn btn-del" onclick="confirmRemoveCh('${esc(ch.name)}','${esc(ch.platform)}')"><i class="bi bi-trash3"></i></button></div></div></div>`;
+        return `<div class="ch-card" data-name="${esc(ch.name)}"><div class="ch-top"><div class="ch-name-row"><a href="${esc(ch.home_url||('https://twitch.tv/'+ch.name))}" target="_blank" class="ch-name">${esc(ch.name)}</a><div class="ch-badges">${plat}${online}${rb}${lc}</div></div></div><div class="ch-bottom"><div class="ch-quality-row"><span class="ch-quality-label">Qualità:</span><select class="ch-quality-select" onchange="setQuality('${esc(ch.name)}',this.value,'${esc(ch.platform)}')">${qo}</select></div><div class="ch-actions">${liveBtn}${tb}<button class="ch-btn" onclick="forceCheck('${esc(ch.name)}','${esc(ch.platform)}')" title="Controlla ora"><i class="bi bi-arrow-clockwise"></i></button><button class="ch-btn btn-del" onclick="confirmRemoveCh('${esc(ch.name)}','${esc(ch.platform)}')"><i class="bi bi-trash3"></i></button></div></div></div>`;
       }).join('');
     }
 
@@ -409,9 +410,8 @@
     else {
       rl.innerHTML = d.recordings.map(f => {
         const del=f.in_use?'<div class="rec-btn" style="opacity:.3;cursor:not-allowed" title="In registrazione"><i class="bi bi-lock-fill"></i></div>':`<div class="rec-btn del" onclick="confirmDeleteFile('${esc(f.name)}')"><i class="bi bi-trash3"></i></div>`;
-        const play=`<div class="rec-btn" onclick="openRecording('${esc(f.name)}',${f.in_use?'true':'false'})" title="${f.in_use?'Riproduci (in corso)':'Riproduci'}"><i class="bi bi-play-circle"></i></div>`;
         const rt=f.in_use?'<span class="badge-sm badge-rec" style="margin-left:6px;font-size:.55rem"><span class="dot-rec" style="width:4px;height:4px"></span>REC</span>':'';
-        return `<div class="rec-item"><div class="rec-info"><span class="rec-name">${esc(f.name)}${rt}</span><span class="rec-meta">${f.size_human} &middot; ${f.modified}</span></div><div class="rec-actions">${play}<div class="rec-btn"><a href="/recordings/${encodeURIComponent(f.name)}" download><i class="bi bi-download"></i></a></div>${del}</div></div>`;
+        return `<div class="rec-item"><div class="rec-info"><span class="rec-name">${esc(f.name)}${rt}</span><span class="rec-meta">${f.size_human} &middot; ${f.modified}</span></div><div class="rec-actions"><div class="rec-btn"><a href="/recordings/${encodeURIComponent(f.name)}" download><i class="bi bi-download"></i></a></div>${del}</div></div>`;
       }).join('');
     }
   }
@@ -449,37 +449,59 @@
   window.forceCheck=async(name,platform)=>{await api("/api/check",{channel:name});toast("Check richiesto");};
   window.toggleCheckPaused=async()=>{const r=await api("/api/toggle_check_paused",{});toast(`Check canali in pausa: ${r.check_paused_rooms?'ON':'OFF'}`);};
 
-  // ── Riproduzione registrazioni ──
-  let _mts=null;
+  // ── Anteprima della registrazione in corso ──
+  let _mts=null, _liveRestart=null;
   function _previewStatus(text,show){const s=document.getElementById("previewStatus");document.getElementById("previewStatusText").textContent=text||"";s.style.display=show?"flex":"none";}
-  function _destroyPlayer(){ if(_mts){try{_mts.destroy();}catch{} _mts=null;} }
-  window.openRecording=(filename, live)=>{
-    const modal=document.getElementById("previewModal"), vid=document.getElementById("previewVideo");
-    document.getElementById("previewTitle").textContent=filename+(live?"  •  in corso":"");
-    modal.classList.add("open"); _previewStatus("Caricamento…",true);
-    _destroyPlayer();
-    try{vid.pause();vid.removeAttribute("src");vid.load();}catch{}
-    const url="/preview/"+encodeURIComponent(filename);
-    const ext=(filename.split(".").pop()||"").toLowerCase();
-    if(ext==="ts" && window.mpegts && mpegts.isSupported()){
-      _mts=mpegts.createPlayer({type:"mpegts", isLive:false, url},
-                               {lazyLoad:false, lazyLoadMaxDuration:0});
-      _mts.attachMediaElement(vid);
-      _mts.on(mpegts.Events.ERROR,()=>{_previewStatus("Impossibile riprodurre nel browser — usa il download.",true);});
-      _mts.on(mpegts.Events.MEDIA_INFO,()=>{_previewStatus("",false);});
-      _mts.load();
-      vid.play().catch(()=>{});
-      setTimeout(()=>_previewStatus("",false),1500);
-    } else {
-      // mp4/webm/altri: player nativo
-      vid.src=url;
-      vid.addEventListener("loadedmetadata",()=>{_previewStatus("",false);vid.play().catch(()=>{});},{once:true});
-      vid.addEventListener("error",()=>{_previewStatus("Formato non riproducibile nel browser — usa il download.",true);},{once:true});
-    }
-  };
-  window.closePreview=()=>{
+  function _destroyPlayer(){
+    clearTimeout(_liveRestart); _liveRestart=null;
     const vid=document.getElementById("previewVideo");
+    vid.onloadedmetadata=vid.onplaying=vid.onerror=vid.onended=null;
+    if(_mts){try{_mts.destroy();}catch{} _mts=null;}
     try{vid.pause();vid.removeAttribute("src");vid.load();}catch{}
+  }
+  function openPlayer(title,url,isLive,isTs,onLiveEnd){
+    _destroyPlayer();
+    const vid=document.getElementById("previewVideo");
+    document.getElementById("previewTitle").textContent=title;
+    document.getElementById("previewNote").textContent=isLive
+      ?"Anteprima della parte finale della registrazione, con circa 8 secondi di buffer. Audio e video provengono dallo stesso file."
+      :"Riproduzione della registrazione. Se il formato non è supportato dal browser, scarica il file.";
+    document.getElementById("previewModal").classList.add("open");
+    _previewStatus("Caricamento…",true);
+    const error=isLive?"Anteprima non disponibile: la registrazione potrebbe essere appena iniziata o terminata. Chiudi e riprova.":"Impossibile riprodurre nel browser — usa il download.";
+    const play=()=>vid.play().catch(()=>_previewStatus("Premi Play nel video per avviare.",true));
+    vid.onplaying=()=>_previewStatus("",false);
+    vid.onerror=()=>_previewStatus(error,true);
+    vid.onended=()=>{
+      if(isLive){
+        _previewStatus("Registrazione terminata o cambio file…",true);
+        if(onLiveEnd)_liveRestart=setTimeout(onLiveEnd,1000);
+      }
+    };
+    if(isTs && window.mpegts && mpegts.isSupported()){
+      _mts=mpegts.createPlayer({type:"mpegts",isLive,url},
+        {lazyLoad:!isLive, lazyLoadMaxDuration:60, lazyLoadRecoverDuration:20,
+         enableStashBuffer:true, stashInitialSize:384*1024,
+         liveBufferLatencyChasing:false, fixAudioTimestampGap:false,
+         autoCleanupSourceBuffer:isLive, autoCleanupMaxBackwardDuration:30,
+         autoCleanupMinBackwardDuration:15});
+      _mts.attachMediaElement(vid);
+      _mts.on(mpegts.Events.ERROR,()=>_previewStatus(error,true));
+      _mts.load();
+      play();
+    }else if(isLive){
+      _previewStatus("Questo browser non supporta la diretta. Prova un browser con supporto Media Source Extensions.",true);
+    }else{
+      vid.onloadedmetadata=play;
+      vid.src=url;
+    }
+  }
+  window.openLive=(name,platform)=>openPlayer(name+" • LIVE","/live/"+encodeURIComponent(platform||"twitch")+"/"+encodeURIComponent(name),true,true,()=>{
+    const ch=lastData?.channels.find(c=>c.name===name && (c.platform||"twitch")===(platform||"twitch"));
+    if(ch?.actually_recording)window.openLive(name,platform);
+    else _previewStatus("Registrazione terminata. Il video completo è nella sezione Registrazioni.",true);
+  });
+  window.closePreview=()=>{
     _destroyPlayer();
     document.getElementById("previewModal").classList.remove("open");
   };

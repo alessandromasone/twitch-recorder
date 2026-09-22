@@ -1,0 +1,10 @@
+Versione aggiornata: anteprima dalla registrazione in corso
+
+- Guarda live accanto al canale, solo durante la registrazione.
+- Preview dalla coda TS in crescita; buffer indicativo 8-10 secondi.
+- Nessun secondo flusso e nessuna conversione MP4 per la preview.
+- Registrazioni completate: download ed eliminazione, senza player.
+
+Applicazione modifiche dopo la sostituzione dei sorgenti:
+docker compose up -d --build
+Poi ricaricare la pagina del browser.

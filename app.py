@@ -906,65 +906,94 @@ def download_recording(filename):
     return send_from_directory(RECORDINGS_DIR, safe)
 
 
-@app.route("/preview/<path:filename>")
-def preview_recording(filename):
-    safe = os.path.basename(filename)
-    path = os.path.join(RECORDINGS_DIR, safe)
-    if not os.path.isfile(path):
+def _live_tail_offset(source, delay_seconds=8):
+    """Find a recent PAT before the target PCR; preserve original A/V timestamps."""
+    packet_size = 188
+    source.seek(0, os.SEEK_END)
+    size = source.tell()
+    start = max(0, size - 16 * 1024 * 1024)
+    start -= start % packet_size
+    source.seek(start)
+    data = source.read(size - start)
+    clocks = []
+    last_pat = None
+    last_key_pat = None
+    for offset in range(0, len(data) - packet_size + 1, packet_size):
+        packet = data[offset:offset + packet_size]
+        if packet[0] != 0x47:
+            continue
+        pid = ((packet[1] & 0x1f) << 8) | packet[2]
+        if pid == 0 and packet[1] & 0x40:
+            last_pat = start + offset
+        if packet[3] & 0x20 and packet[4] >= 7 and packet[5] & 0x10:
+            if packet[5] & 0x40:
+                last_key_pat = last_pat
+            p = packet[6:12]
+            pcr = (p[0] << 25) | (p[1] << 17) | (p[2] << 9) | (p[3] << 1) | (p[4] >> 7)
+            if last_pat is not None:
+                clocks.append((pcr, last_key_pat if last_key_pat is not None else last_pat))
+    if not clocks:
+        return 0 if start == 0 else (last_pat or start)
+    latest = clocks[-1][0]
+    # PCR wraps every 2**33 ticks. Pick the closest point at least 8s behind.
+    for clock, pat in reversed(clocks):
+        if (latest - clock) % (1 << 33) >= delay_seconds * 90000:
+            return pat
+    return clocks[0][1]
+
+
+@app.route("/live/<platform>/<room>")
+def preview_live(platform, room):
+    """Follow the tail of the existing TS, without another download or remux."""
+    with _lock:
+        channel = next((c for c in _channels if c["name"] == room
+                        and c.get("platform", DEFAULT_PLATFORM) == platform), None)
+        rec = _recorders.get(room) if channel else None
+        path = rec.output_path if rec and rec.is_recording else None
+    if channel is None:
         abort(404)
+    if not path or not path.lower().endswith(".ts"):
+        return jsonify(error="Nessuna registrazione in corso"), 409
+    try:
+        source = open(path, "rb")
+    except OSError:
+        return jsonify(error="Registrazione in preparazione, riprova tra poco"), 409
+    try:
+        source.seek(_live_tail_offset(source))
+    except Exception:
+        source.close()
+        raise
 
-    file_size = os.path.getsize(path)
-    range_header = request.headers.get("Range")
-
-    # Per le estensioni video usiamo SEMPRE il mime corretto: mimetypes.guess_type
-    # su molti sistemi mappa ".ts" a un tipo errato (es. Qt Linguist/TypeScript).
-    ext = os.path.splitext(safe)[1].lower()
-    mime_map = {
-        ".ts": "video/mp2t", ".mp4": "video/mp4",
-        ".mkv": "video/x-matroska", ".webm": "video/webm",
-        ".flv": "video/x-flv", ".avi": "video/x-msvideo",
-        ".mov": "video/quicktime",
-    }
-    mime = mime_map.get(ext) or mimetypes.guess_type(safe)[0] or "application/octet-stream"
-
-    if range_header:
-        m = re.search(r"bytes=(\d+)-(\d*)", range_header)
-        if not m:
-            abort(416)
-        start = int(m.group(1))
-        end = int(m.group(2)) if m.group(2) else min(start + 2 * 1024 * 1024, file_size - 1)
-        end = min(end, file_size - 1)
-        if start >= file_size:
-            abort(416)
-        length = end - start + 1
-
-        def gen_range():
-            with open(path, "rb") as f:
-                f.seek(start)
-                rem = length
-                while rem > 0:
-                    chunk = f.read(min(8192, rem))
-                    if not chunk:
-                        break
-                    rem -= len(chunk)
-                    yield chunk
-
-        return Response(gen_range(), status=206, mimetype=mime, headers={
-            "Content-Range": f"bytes {start}-{end}/{file_size}",
-            "Content-Length": str(length),
-            "Accept-Ranges": "bytes",
-        })
-
-    def gen_full():
-        with open(path, "rb") as f:
+    def generate():
+        last_data = time.monotonic()
+        try:
             while True:
-                chunk = f.read(8192)
-                if not chunk:
+                # Never emit a partial TS packet while the recorder is writing.
+                position = source.tell()
+                available = os.fstat(source.fileno()).st_size - position
+                count = min(188 * 256, (available // 188) * 188)
+                if count > 0:
+                    chunk = source.read(count)
+                    if chunk:
+                        last_data = time.monotonic()
+                        yield chunk
+                        continue
+                with _lock:
+                    current = _recorders.get(room)
+                    active = (current is rec and current.is_recording
+                              and current.output_path == path)
+                # At rotation, end this TS so the player can reset its timeline.
+                if not active or time.monotonic() - last_data > 30:
                     break
-                yield chunk
+                time.sleep(0.2)
+        finally:
+            source.close()
 
-    return Response(gen_full(), status=200, mimetype=mime,
-                    headers={"Content-Length": str(file_size), "Accept-Ranges": "bytes"})
+    response = Response(generate(), mimetype="video/mp2t", headers={
+        "Cache-Control": "no-store", "X-Accel-Buffering": "no",
+    })
+    response.call_on_close(source.close)
+    return response
 
 
 @app.route("/delete_recording", methods=["POST"])
