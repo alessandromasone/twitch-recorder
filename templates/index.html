@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token_value }}">
   <title>Twitch Recorder</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📹</text></svg>">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg', v='1') }}">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -24,6 +25,7 @@
     * { box-sizing: border-box; }
     body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--surface); color: var(--text1); margin: 0; }
     .shell { max-width: 1100px; margin: 0 auto; padding: 16px; }
+    .workspace-grid { display: block; }
 
     .hdr { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
     .hdr-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.2rem; }
@@ -72,10 +74,17 @@
     .panel-hdr-left { display: flex; align-items: center; gap: 8px; }
     .panel-hdr .badge-count { background: var(--tw-glow); color: var(--tw); border-radius: 6px; padding: 2px 8px; font-size: .72rem; font-weight: 600; }
 
-    .sort-btns { display: flex; gap: 2px; }
-    .sort-btn { background: transparent; border: 1px solid transparent; border-radius: 5px; padding: 2px 8px; color: var(--text3); cursor: pointer; font-family: inherit; font-size: .68rem; font-weight: 500; transition: all .15s; display: inline-flex; align-items: center; gap: 3px; }
-    .sort-btn:hover { color: var(--text2); }
-    .sort-btn.active { background: var(--tw-glow); color: var(--tw); border-color: rgba(145,70,255,.2); }
+    .channel-tools { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+    .channel-search-wrap { position: relative; min-width: 150px; flex: 1 1 190px; max-width: 280px; }
+    .channel-search-wrap i { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--text3); pointer-events: none; }
+    .channel-search { width: 100%; background: var(--surface3); border: 1px solid var(--border); border-radius: 7px; padding: 6px 9px 6px 29px; color: var(--text1); font: inherit; font-size: .75rem; outline: none; }
+    .channel-search:focus { border-color: var(--tw); }
+    .channel-search::placeholder { color: var(--text3); }
+    .channel-sort-select { background: var(--surface3); border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; color: var(--text1); font: inherit; font-size: .75rem; outline: none; max-width: 190px; }
+    .channel-sort-select:focus { border-color: var(--tw); }
+    .channel-filter-select { background: var(--surface3); border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; color: var(--text1); font: inherit; font-size: .75rem; outline: none; max-width: 190px; }
+    .channel-filter-select:focus { border-color: var(--tw); }
+    @media (max-width: 640px) { .channel-tools { width: 100%; } .channel-search-wrap { max-width: none; flex-basis: 100%; } .channel-sort-select, .channel-filter-select { flex: 1; max-width: none; } }
 
     .bulk-btns { display: flex; gap: 4px; flex-wrap: wrap; }
     .bulk-btn { background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; color: var(--text2); cursor: pointer; font-family: inherit; font-size: .7rem; font-weight: 500; transition: all .15s; display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
@@ -99,22 +108,39 @@
     .badge-sm { font-size: .65rem; font-weight: 600; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; letter-spacing: .03em; display: inline-flex; align-items: center; gap: 3px; }
     .badge-online { background: rgba(34,197,94,.12); color: #22c55e; }
     .badge-offline { background: rgba(99,99,112,.12); color: var(--text3); }
+    .badge-verifying { background: rgba(251,191,36,.14); color: #d99c0b; }
+    .badge-error { background: rgba(239,68,68,.12); color: #ef4444; }
+    .badge-preview { background: rgba(56,189,248,.12); color: #38bdf8; }
+    .badge-rerun { background: rgba(148,163,184,.14); color: #cbd5e1; }
     .badge-rec { background: rgba(239,68,68,.12); color: #ef4444; }
-    .badge-paused { background: rgba(251,191,36,.1); color: #fbbf24; }
+.badge-sleeping { background: rgba(167,139,250,.14); color: #a78bfa; }
+.ch-btn.btn-sleep { border-color: rgba(167,139,250,.35); }
+.ch-btn.btn-sleep:hover, .ch-btn.btn-sleep.active { border-color: #a78bfa; color: #a78bfa; background: rgba(167,139,250,.12); }
+.ch-btn:disabled { opacity: .35; cursor: not-allowed; }
     .badge-waiting { background: rgba(145,70,255,.1); color: var(--tw); }
     .dot-rec { width: 6px; height: 6px; border-radius: 50%; background: var(--rec); animation: pulse 1.2s ease infinite; }
     .ch-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .ch-quality-row { display: flex; align-items: center; gap: 6px; }
     .ch-quality-label { font-size: .7rem; color: var(--text3); }
-    .ch-actions { display: flex; gap: 4px; }
+    .ch-actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
     .ch-btn { background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; color: var(--text2); cursor: pointer; font-size: .78rem; transition: all .15s; display: inline-flex; align-items: center; gap: 3px; }
     .ch-btn:hover { border-color: var(--text2); color: var(--text1); background: var(--surface3); }
     .ch-btn.btn-pause:hover { border-color: #fbbf24; color: #fbbf24; }
     .ch-btn.btn-play:hover { border-color: var(--online); color: var(--online); }
+    .ch-btn.btn-single-live:hover, .ch-btn.btn-single-live.active { border-color: #38bdf8; color: #38bdf8; background: rgba(56,189,248,.09); }
     .ch-btn.btn-del:hover { border-color: var(--rec); color: var(--rec); }
     .uptime-tag { font-family: 'JetBrains Mono', monospace; font-size: .65rem; color: var(--text3); margin-left: 4px; }
+    .ch-diagnostics { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding-top: 7px; color: var(--text3); font-size: .68rem; }
+    .ch-diagnostics .diag-error { color: #ef4444; max-width: min(100%, 540px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .monitor-strip { margin: 10px 0 14px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface2); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: .75rem; color: var(--text2); }
+    .monitor-status { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 4px 8px; font-weight: 700; background: rgba(34,197,94,.12); color: #22c55e; }
+    .monitor-status.degraded { background: rgba(251,191,36,.14); color: #d99c0b; }
+    .monitor-status.stopped { background: rgba(239,68,68,.12); color: #ef4444; }
+    .monitor-strip .monitor-details { flex: 1; min-width: 180px; }
 
     .rec-list { max-height: 400px; overflow-y: auto; }
+    .rec-list, .ch-list { overflow-anchor: none; scrollbar-gutter: stable; }
+    [hidden] { display: none !important; }
     .rec-list::-webkit-scrollbar { width: 4px; }
     .rec-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
     .rec-item { padding: 8px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; transition: background .15s; }
@@ -128,6 +154,17 @@
     .rec-btn:hover { border-color: var(--tw); color: var(--tw); background: var(--tw-glow); }
     .rec-btn.del:hover { border-color: var(--rec); color: var(--rec); background: rgba(239,68,68,.08); }
     .rec-btn a { color: inherit; text-decoration: none; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+
+    /* Layout ampio e scroll indipendente per canali e registrazioni su desktop. */
+    @media (min-width: 1250px) {
+      .shell { width: 100%; max-width: none; padding: 20px clamp(18px, 2vw, 36px); }
+      .workspace-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(360px, .92fr); gap: 16px; align-items: start; }
+      .workspace-grid > .panel { min-width: 0; margin-bottom: 0; }
+      .workspace-grid .ch-list, .workspace-grid .rec-list { max-height: min(72vh, max(280px, calc(100vh - 330px))); min-height: 280px; overscroll-behavior: contain; }
+    }
+    @media (min-width: 1700px) {
+      .workspace-grid { grid-template-columns: minmax(0, 1.12fr) minmax(420px, .88fr); }
+    }
 
     .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px 20px; color: var(--text3); text-align: center; }
     .empty-state i { font-size: 2rem; margin-bottom: 8px; opacity: .4; }
@@ -156,7 +193,20 @@
     .toast-msg.warning { background: rgba(251,191,36,.15); color: #fbbf24; border: 1px solid rgba(251,191,36,.3); }
     .toast-msg.danger { background: rgba(239,68,68,.15); color: #ef4444; border: 1px solid rgba(239,68,68,.3); }
     @keyframes fadeIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:none} }
-    .plat-badge { font-size: .58rem; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: var(--tw-glow, rgba(145,70,255,.15)); color: var(--tw); border: 1px solid rgba(145,70,255,.3); text-transform: uppercase; letter-spacing: .3px; }
+    .plat-badge { font-size: .58rem; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: var(--surface3); color: var(--text2); border: 1px solid var(--border); text-transform: uppercase; letter-spacing: .3px; min-width: 26px; text-align: center; }
+    .plat-badge.plat-twitch { background: rgba(145,70,255,.14); color: #b896ff; border-color: rgba(145,70,255,.38); }
+    .plat-badge.plat-kick { background: rgba(83,252,24,.12); color: #53fc18; border-color: rgba(83,252,24,.38); }
+    .plat-badge.plat-youtube { background: rgba(255,0,51,.12); color: #ff405f; border-color: rgba(255,0,51,.38); }
+    .live-state-dot { display: inline-block; width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--text3); margin-right: 1px; }
+    .live-state-dot.online { background: #22c55e; box-shadow: 0 0 0 2px rgba(34,197,94,.12); }
+    .live-state-dot.offline { background: #ef4444; box-shadow: 0 0 0 2px rgba(239,68,68,.10); }
+    .live-state-dot.verifying { background: #fbbf24; }
+    .live-state-dot.uncertain { background: #f59e0b; }
+    .live-state-dot.sleeping { background: #a78bfa; }
+    .live-state-dot.private { background: #38bdf8; box-shadow: 0 0 0 2px rgba(56,189,248,.12); }
+    .live-state-dot.rerun { background: #94a3b8; box-shadow: 0 0 0 2px rgba(148,163,184,.12); }
+    .live-state-dot.unknown { background: #777783; }
+    .last-live-value { color: var(--text2); }
     .preview-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.8); z-index: 3500; align-items: center; justify-content: center; padding: 16px; }
     .preview-backdrop.open { display: flex; }
     .preview-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; width: min(900px, 96vw); max-height: 92vh; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,.5); display: flex; flex-direction: column; }
@@ -223,7 +273,7 @@
       <video id="previewVideo" playsinline controls></video>
       <div class="preview-status" id="previewStatus"><div class="preview-spinner"></div><span id="previewStatusText">Caricamento…</span></div>
     </div>
-    <div class="preview-note" id="previewNote">Anteprima della registrazione in corso.</div>
+    <div class="preview-note" id="previewNote">Flusso live temporaneo; chiudendo il player, la connessione viene terminata.</div>
   </div>
 </div>
 
@@ -236,14 +286,27 @@
         <span class="sse-dot connecting" id="sseDot"></span>
         <span id="sseLabel">Connessione…</span>
       </div>
+      {% if login_enabled %}
+      <form action="{{ url_for('logout') }}" method="post" class="logout-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token_value }}">
+        <button class="icon-btn" type="submit" title="Esci" aria-label="Esci"><i class="bi bi-box-arrow-right"></i></button>
+      </form>
+      {% endif %}
       <button class="icon-btn" id="themeToggle" title="Tema"><i class="bi bi-circle-half"></i></button>
     </div>
+  </div>
+
+  <div class="monitor-strip" aria-live="polite">
+    <span class="monitor-status" id="monitorStateBadge"><i class="bi bi-activity"></i> Monitor in avvio</span>
+    <span class="monitor-details" id="monitorDetails">Preparazione dei controlli…</span>
+    <button class="bulk-btn" type="button" onclick="forceCheckAll()" title="Richiedi subito un controllo per tutti i canali"><i class="bi bi-arrow-clockwise"></i> Controlla tutti</button>
   </div>
 
   <div class="stats-strip">
     <div class="stat-pill"><div class="stat-icon" style="background:rgba(145,70,255,.1);color:var(--tw)"><i class="bi bi-people-fill"></i></div><div><div class="stat-val" id="sChannels">—</div><div class="stat-lbl">Canali</div></div></div>
     <div class="stat-pill"><div class="stat-icon" style="background:rgba(34,197,94,.1);color:#22c55e"><i class="bi bi-broadcast"></i></div><div><div class="stat-val" id="sOnline">—</div><div class="stat-lbl">Online</div></div></div>
     <div class="stat-pill"><div class="stat-icon" style="background:rgba(239,68,68,.1);color:#ef4444"><i class="bi bi-record-circle"></i></div><div><div class="stat-val" id="sRec">—</div><div class="stat-lbl">Registrando</div></div></div>
+    <div class="stat-pill"><div class="stat-icon" style="background:rgba(56,189,248,.1);color:#38bdf8"><i class="bi bi-play-circle"></i></div><div><div class="stat-val" id="sPreview">—</div><div class="stat-lbl">Preview attive</div></div></div>
     <div class="stat-pill"><div class="stat-icon" style="background:rgba(56,189,248,.1);color:#38bdf8"><i class="bi bi-archive-fill"></i></div><div><div class="stat-val" id="sFiles">—</div><div class="stat-lbl">File</div></div></div>
     <div class="stat-pill"><div class="stat-icon" style="background:rgba(251,191,36,.1);color:#fbbf24"><i class="bi bi-hdd-fill"></i></div><div><div class="stat-val" id="sSize">—</div><div class="stat-lbl">Usato</div></div></div>
   </div>
@@ -258,6 +321,7 @@
 
   <div class="add-bar">
     <form id="addForm">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token_value }}">
       <select id="addPlatform" title="Piattaforma"></select>
       <input type="text" id="addChannel" placeholder="Nome canale o URL…" required autocomplete="off">
       <select id="addQuality">
@@ -276,15 +340,34 @@
     </form>
   </div>
 
+  <div class="workspace-grid">
   <div class="panel">
     <div class="panel-hdr">
       <div class="panel-hdr-left"><span><i class="bi bi-collection-play me-1"></i>Canali</span><span class="badge-count" id="chCount">0</span></div>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <div class="sort-btns">
-          <button class="sort-btn active" data-sort="default" onclick="setSortMode('default')"><i class="bi bi-list-ul"></i> Default</button>
-          <button class="sort-btn" data-sort="online" onclick="setSortMode('online')"><i class="bi bi-broadcast"></i> Live</button>
-          <button class="sort-btn" data-sort="name" onclick="setSortMode('name')"><i class="bi bi-sort-alpha-down"></i> Nome</button>
-        </div>
+      <div class="channel-tools">
+        <label class="channel-search-wrap" aria-label="Cerca canali">
+          <i class="bi bi-search"></i>
+          <input type="search" id="channelSearch" class="channel-search" placeholder="Cerca live o piattaforma…" autocomplete="off" spellcheck="false">
+        </label>
+        <select id="channelSort" class="channel-sort-select" aria-label="Ordina canali" title="Ordina canali">
+          <option value="default">Priorità</option>
+          <option value="online">Live prima</option>
+          <option value="name">Nome A–Z</option>
+          <option value="last_live">Ultima live</option>
+          <option value="last_checked">Ultimo controllo</option>
+        </select>
+        <select id="channelFilter" class="channel-filter-select" aria-label="Filtra canali" title="Mostra solo i canali selezionati">
+          <option value="all">Tutti i canali</option>
+          <option value="online">Solo online</option>
+          <option value="recording">Solo in REC</option>
+          <option value="not_paused">Non in pausa</option>
+          <option value="paused">Solo in pausa</option>
+          <option value="sleeping">Solo a dormire</option>
+          <option value="private">Solo private</option>
+          <option value="rerun">Solo rerun escluse</option>
+          <option value="offline">Solo offline</option>
+          <option value="uncertain">Da verificare</option>
+        </select>
         <div class="bulk-btns" id="bulkBtns" style="display:none">
           <button class="bulk-btn bp" onclick="bulkAction('pause_all')"><i class="bi bi-pause-fill"></i> Pausa</button>
           <button class="bulk-btn br" onclick="bulkAction('resume_all')"><i class="bi bi-play-fill"></i> Riprendi</button>
@@ -302,15 +385,22 @@
     </div>
     <div class="rec-list" id="recList"><div class="empty-state"><i class="bi bi-inbox"></i><p>Caricamento…</p></div></div>
   </div>
+  </div>
 </div>
 
 <script>
 (() => {
   "use strict";
   let qualityOpts = [], currentSort = localStorage.getItem("tr-sort") || "default";
+  if (!['default','online','name','last_live','last_checked'].includes(currentSort)) currentSort = 'default';
+  let currentFilter = localStorage.getItem("tr-filter") || "all";
+  if (!['all','online','recording','not_paused','paused','sleeping','private','rerun','offline','uncertain'].includes(currentFilter)) currentFilter = 'all';
   let platforms = [];
   let lastData = null, evtSource = null, reconnectTimer = null;
   let _pendingRemove = "", _pendingRemovePlat = "", _pendingDelete = "";
+  let lastChannelInteraction = 0, reorderTimer = null;
+  const recordingRows = new Map();
+  const channelRows = new Map();
 
   const html = document.documentElement;
   const saved = localStorage.getItem("tr-theme");
@@ -327,9 +417,16 @@
     setTimeout(() => t.remove(), 3000);
   }
 
+  function goToLogin() {
+    const next = window.location.pathname + window.location.search;
+    window.location.href = `/login?next=${encodeURIComponent(next)}`;
+  }
+
   async function api(url, body) {
     try {
-      const r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+      const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+      const r = await fetch(url, {method:"POST", credentials:"same-origin", headers:{"Content-Type":"application/json", "X-CSRF-Token":csrf}, body:JSON.stringify(body)});
+      if (r.status === 401) { goToLogin(); return {ok:false}; }
       return await r.json();
     } catch(e) { toast("Errore di rete", "danger"); return {ok:false}; }
   }
@@ -339,20 +436,317 @@
     const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sc=s%60;
     return h>0?`${h}h${String(m).padStart(2,'0')}m`:m>0?`${m}m${String(sc).padStart(2,'0')}s`:`${sc}s`;
   }
+  function timestampMs(value) {
+    if (value === null || value === undefined || value === "") return null;
+    if (typeof value === "number" && Number.isFinite(value)) return value * 1000;
+    const numeric = Number(value);
+    if (String(value).trim() !== "" && Number.isFinite(numeric)) return numeric * 1000;
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  function relativeTimestamp(value) {
+    const ms = timestampMs(value);
+    if (ms === null) return "mai rilevata";
+    const sec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+    if (sec < 60) return sec < 5 ? "adesso" : `${sec}s fa`;
+    if (sec < 3600) return `${Math.floor(sec / 60)} min fa`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)} h fa`;
+    return `${Math.floor(sec / 86400)} giorni fa`;
+  }
+  function formatTimestamp(value) {
+    const ms = timestampMs(value);
+    return ms === null ? "Data non disponibile" : new Date(ms).toLocaleString();
+  }
   function esc(s) { const d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
 
   window.setSortMode = function(mode) {
-    currentSort = mode; localStorage.setItem("tr-sort", mode);
-    document.querySelectorAll(".sort-btn").forEach(b => b.classList.toggle("active", b.dataset.sort===mode));
-    if (lastData) render(lastData);
+    if (!['default','online','name','last_live','last_checked'].includes(mode)) mode = 'default';
+    currentSort = mode;
+    localStorage.setItem("tr-sort", mode);
+    const sort = document.getElementById('channelSort');
+    if (sort) sort.value = mode;
+    if (lastData) renderChannels(lastData.channels || [], lastData.config || {}, true);
   };
-  document.querySelectorAll(".sort-btn").forEach(b => b.classList.toggle("active", b.dataset.sort===currentSort));
 
-  function sortChannels(ch) {
-    const a=[...ch];
-    if (currentSort==="online") a.sort((x,y)=>((y.online?100:0)+(y.actually_recording?50:0))-((x.online?100:0)+(x.actually_recording?50:0))||x.name.localeCompare(y.name));
-    else if (currentSort==="name") a.sort((x,y)=>x.name.localeCompare(y.name));
-    return a;
+  const searchInput = document.getElementById('channelSearch');
+  const sortInput = document.getElementById('channelSort');
+  const filterInput = document.getElementById('channelFilter');
+  if (sortInput) sortInput.value = currentSort;
+  if (filterInput) filterInput.value = currentFilter;
+  if (searchInput) searchInput.addEventListener('input', () => {
+    lastChannelInteraction = Date.now();
+    if (lastData) renderChannels(lastData.channels || [], lastData.config || {}, true);
+  });
+  if (sortInput) sortInput.addEventListener('change', () => {
+    lastChannelInteraction = Date.now();
+    window.setSortMode(sortInput.value);
+  });
+  if (filterInput) filterInput.addEventListener('change', () => {
+    currentFilter = ['all','online','recording','not_paused','paused','sleeping','private','rerun','offline','uncertain'].includes(filterInput.value) ? filterInput.value : 'all';
+    localStorage.setItem('tr-filter', currentFilter);
+    lastChannelInteraction = Date.now();
+    if (lastData) renderChannels(lastData.channels || [], lastData.config || {}, true);
+  });
+
+  const channelListElement = document.getElementById('chList');
+  if (channelListElement) {
+    ['pointerdown','focusin','click','change'].forEach(type => channelListElement.addEventListener(type, () => {
+      lastChannelInteraction = Date.now();
+    }, true));
+    channelListElement.addEventListener('click', async event => {
+      const button = event.target.closest('button[data-action]');
+      if (!button) return;
+      const card = button.closest('.ch-card');
+      if (!card) return;
+      const name = card.dataset.name || '', platform = card.dataset.platform || 'twitch';
+      switch (button.dataset.action) {
+        case 'live': window.openLive(name, platform); break;
+        case 'single-live': await window.toggleSingleLive(name, platform); break;
+        case 'sleep': await window.toggleSleep(name, platform); break;
+        case 'record-toggle': await window.chAction(card.dataset.recording === 'true' ? 'pause' : 'resume', name, platform); break;
+        case 'force-check': await window.forceCheck(name, platform); break;
+        case 'remove': window.confirmRemoveCh(name, platform); break;
+      }
+    });
+    channelListElement.addEventListener('change', async event => {
+      const select = event.target.closest('select[data-action="quality"]');
+      if (!select) return;
+      const card = select.closest('.ch-card');
+      if (!card) return;
+      const requested = select.value;
+      const result = await api('/api/room', {action:'set_quality', channel:card.dataset.name, platform:card.dataset.platform, quality:requested});
+      toast(result.msg || (result.ok ? 'Qualità aggiornata' : 'Errore nel cambio qualità'), result.ok ? 'success' : 'warning');
+      if (!result.ok && lastData) {
+        const latest = (lastData.channels || []).find(ch => ch.name === card.dataset.name);
+        if (latest) select.value = latest.quality;
+      }
+    });
+  }
+
+  function channelLastLiveMs(ch) {
+    return timestampMs(ch.last_live || ch.last_online) || 0;
+  }
+  function channelLastCheckedMs(ch) {
+    // L'API espone last_checked come età in secondi: meno secondi = controllo più recente.
+    return Number.isFinite(Number(ch.last_checked)) && ch.last_checked !== null ? -Number(ch.last_checked) : 0;
+  }
+  function channelPriority(ch) {
+    if (ch.actually_recording) return 0;
+    if (ch.online && ch.is_recording) return 1;
+    if (ch.online) return 2;
+    if (ch.last_status === 'private' || ch.last_check_result === 'private') return 3;
+    if (ch.last_check_result === 'verifying_offline' || ch.last_check_result === 'error' || ch.last_check_result === 'checking' || ch.last_status === 'unknown') return 4;
+    if (ch.last_status === 'rerun' || ch.last_check_result === 'rerun') return 6;
+    if (ch.is_recording && !ch.sleeping) return 5;
+    if (ch.sleeping) return 7;
+    return 6;
+  }
+  function sortChannels(channels) {
+    const sorted = [...channels];
+    if (currentSort === 'name') sorted.sort((a,b) => a.name.localeCompare(b.name, undefined, {sensitivity:'base'}));
+    else if (currentSort === 'online') sorted.sort((a,b) => {
+      const rank = ch => ch.actually_recording ? 0 : ch.online ? 1 : ch.last_check_result === 'verifying_offline' || ch.last_check_result === 'error' ? 2 : ch.last_status === 'rerun' || ch.last_check_result === 'rerun' ? 4 : ch.sleeping ? 5 : 3;
+      return rank(a)-rank(b) || a.name.localeCompare(b.name, undefined, {sensitivity:'base'});
+    });
+    else if (currentSort === 'last_live') sorted.sort((a,b) => channelLastLiveMs(b)-channelLastLiveMs(a) || a.name.localeCompare(b.name, undefined, {sensitivity:'base'}));
+    else if (currentSort === 'last_checked') sorted.sort((a,b) => channelLastCheckedMs(b)-channelLastCheckedMs(a) || a.name.localeCompare(b.name, undefined, {sensitivity:'base'}));
+    else sorted.sort((a,b) => channelPriority(a)-channelPriority(b) || channelLastLiveMs(b)-channelLastLiveMs(a) || a.name.localeCompare(b.name, undefined, {sensitivity:'base'}));
+    return sorted;
+  }
+
+  function makeChannelCard() {
+    const card = document.createElement('div');
+    card.className = 'ch-card';
+    card.innerHTML = `
+      <div class="ch-top">
+        <div class="ch-top-main">
+          <div class="ch-name-row">
+            <span class="live-state-dot unknown" data-part="state-dot" title="Stato non ancora confermato" aria-label="Stato non ancora confermato"></span>
+            <a href="#" target="_blank" rel="noopener noreferrer" class="ch-name" data-part="name"></a>
+            <div class="ch-badges" data-part="badges"></div>
+          </div>
+          <div class="ch-diagnostics" data-part="diagnostics"></div>
+        </div>
+      </div>
+      <div class="ch-bottom">
+        <div class="ch-quality-row"><span class="ch-quality-label">Qualità:</span><select class="ch-quality-select" data-action="quality" aria-label="Qualità registrazione"></select></div>
+        <div class="ch-actions">
+          <button type="button" class="ch-btn btn-play" data-action="live" title="Guarda la live"><i class="bi bi-broadcast"></i> Guarda live</button>
+          <button type="button" class="ch-btn btn-single-live" data-action="single-live" title="Attiva Una volta"><i class="bi bi-clock"></i> Una volta</button>
+          <button type="button" class="ch-btn btn-sleep" data-action="sleep" title="A dormire" aria-label="A dormire"><i class="bi bi-moon"></i></button>
+          <button type="button" class="ch-btn btn-play" data-action="record-toggle" title="Riprendi registrazione"><i class="bi bi-play-fill"></i></button>
+          <button type="button" class="ch-btn" data-action="force-check" title="Forza subito un controllo"><i class="bi bi-arrow-clockwise"></i></button>
+          <button type="button" class="ch-btn btn-del" data-action="remove" title="Rimuovi canale"><i class="bi bi-trash3"></i></button>
+        </div>
+      </div>`;
+    return card;
+  }
+
+  function updateChannelCard(card, ch, config) {
+    card.dataset.name = ch.name;
+    card.dataset.platform = ch.platform || 'twitch';
+    card.dataset.recording = ch.is_recording ? 'true' : 'false';
+    const name = card.querySelector('[data-part="name"]');
+    name.textContent = ch.name;
+    name.href = ch.home_url || ((ch.platform || 'twitch') === 'youtube' ? `https://www.youtube.com/@${encodeURIComponent(ch.name)}` : `https://${ch.platform === 'kick' ? 'kick.com' : 'twitch.tv'}/${encodeURIComponent(ch.name)}`);
+
+    let badgeOnline = '';
+    if (ch.sleeping) {
+      badgeOnline = '<span class="badge-sm badge-sleeping" title="Il canale non viene controllato finché non lo risvegli"><i class="bi bi-moon-stars-fill"></i> A dormire · check sospesi</span>';
+    } else if (ch.last_check_result === 'verifying_offline') {
+      badgeOnline = `<span class="badge-sm badge-verifying" title="Esiti offline ${ch.offline_confirmation_count}/${ch.offline_confirmations_required}; la registrazione non viene fermata finché non sono confermati"><i class="bi bi-hourglass-split"></i> Verifica ${ch.offline_confirmation_count}/${ch.offline_confirmations_required}</span>`;
+    } else if (ch.last_check_result === 'error') {
+      badgeOnline = `<span class="badge-sm badge-error" title="Ultimo stato confermato: ${esc(ch.last_status||'sconosciuto')}. ${esc(ch.last_error||'Errore temporaneo; lo stato confermato viene mantenuto')}"><i class="bi bi-exclamation-triangle"></i> Incerto · ${ch.last_status==='online'?'online':'offline'}?</span>`;
+    } else if (ch.last_check_result === 'rerun') {
+      badgeOnline = '<span class="badge-sm badge-rerun" title="Rerun rilevata tramite metadati Twitch: la registrazione viene saltata"><i class="bi bi-skip-forward-fill"></i> Rerun esclusa</span>';
+    } else if (ch.last_status === 'private' || ch.last_check_result === 'private') {
+      badgeOnline = '<span class="badge-sm badge-preview" title="Il canale risulta privato o accessibile solo agli abbonati"><i class="bi bi-lock-fill"></i> Privata</span>';
+    } else if (!ch.online && (ch.last_status === 'unknown' || ch.last_check_result === 'checking')) {
+      badgeOnline = '<span class="badge-sm badge-verifying"><i class="bi bi-hourglass-split"></i> In verifica</span>';
+    }
+    let recordingBadge = '';
+    if (ch.actually_recording) {
+      recordingBadge = `<span class="badge-sm badge-rec"><span class="dot-rec"></span>REC</span>${ch.uptime ? `<span class="uptime-tag">${uptime(ch.uptime)}</span>` : ''}`;
+    } else if (ch.is_recording) recordingBadge = '<span class="badge-sm badge-waiting">In attesa</span>';
+    else if (ch.sleeping) recordingBadge = '<span class="badge-sm badge-sleeping"><i class="bi bi-moon-stars-fill"></i> Registrazione ferma</span>';
+
+    const previewBadge = ch.preview_active
+      ? `<span class="badge-sm badge-preview" title="${ch.preview_mode==='shared'?'La preview usa il flusso della registrazione':'Flusso temporaneo chiuso alla chiusura del player'}"><i class="bi bi-play-circle"></i> Preview ${ch.preview_mode==='shared'?'condivisa':'temporanea'}${ch.preview_connections>1?' ×'+ch.preview_connections:''}</span>` : '';
+    const platKey = ['twitch','kick','youtube'].includes(ch.platform) ? ch.platform : 'unknown';
+    const plat = `<span class="plat-badge plat-${platKey}" title="${esc(ch.platform_label||ch.platform||'Piattaforma')}" aria-label="${esc(ch.platform_label||ch.platform||'Piattaforma')}">${esc(ch.platform_short||({'twitch':'TW','kick':'KI','youtube':'YT'}[platKey]||'??'))}</span>`;
+    const singleLiveBadge = ch.single_live_mode
+      ? `<span class="badge-sm" style="background:rgba(56,189,248,.12);color:#38bdf8" title="${ch.single_live_offline_remaining!=null?'Pausa automatica dopo il conto alla rovescia, dopo un controllo finale':'La modalità si disattiva 2 ore dopo la fine confermata della live'}">${ch.single_live_offline_remaining!=null?`Attesa ${uptime(ch.single_live_offline_remaining)}`:(!ch.single_live_seen_online?'Una volta · in attesa':'Una volta · attiva')}</span>` : '';
+    const lastLive = ch.last_live || ch.last_online;
+    const lastLiveBadge = lastLive
+      ? `<span class="last-live-value" title="Ultima live rilevata: ${esc(formatTimestamp(lastLive))}">Last live ${esc(relativeTimestamp(lastLive))}</span>`
+      : '<span class="last-live-value" title="Non è ancora stata rilevata una live">Last live mai rilevata</span>';
+    const lastChecked = ch.sleeping ? '<span class="uptime-tag" title="I controlli sono sospesi dalla modalità A dormire">Check sospesi</span>' : ch.last_checked != null ? `<span class="uptime-tag" title="Ultimo controllo riuscito o fallito">Check ${uptime(ch.last_checked)} fa</span>` : '<span class="uptime-tag" style="color:var(--rec)">mai controllato</span>';
+    const retries = ch.reconnect_attempts ? `<span title="Tentativi correnti di riconnessione">Riconnessioni ${ch.reconnect_attempts}/${config.reconnect_tries ?? 3}</span>` : '';
+    const checkFails = ch.check_failures ? `<span title="Errori consecutivi nel monitor">Errori check ${ch.check_failures}</span>` : '';
+    const errorRow = ch.last_error ? `<span class="diag-error" title="${esc(ch.last_error)}">Errore: ${esc(ch.last_error)}</span>` : '';
+    const badgeContainer = card.querySelector('[data-part="badges"]');
+    const badgeHtml = `${plat}${badgeOnline}${recordingBadge}${previewBadge}${singleLiveBadge}${lastChecked}`;
+    if (badgeContainer.innerHTML !== badgeHtml) badgeContainer.innerHTML = badgeHtml;
+    const diagnostics = card.querySelector('[data-part="diagnostics"]');
+    const diagnosticsHtml = `${lastLiveBadge}${retries}${checkFails}${errorRow}`;
+    if (diagnostics.innerHTML !== diagnosticsHtml) diagnostics.innerHTML = diagnosticsHtml;
+
+    let dotState = 'unknown', dotTitle = 'Stato non ancora confermato';
+    if (ch.sleeping) { dotState = 'sleeping'; dotTitle = 'A dormire: stato non aggiornato perché i controlli sono sospesi'; }
+    else if (ch.last_check_result === 'verifying_offline') { dotState = 'verifying'; dotTitle = 'Verifica della fine della live in corso'; }
+    else if (ch.last_check_result === 'error') { dotState = 'uncertain'; dotTitle = 'Controllo incerto; ultimo stato confermato: ' + (ch.last_status || 'sconosciuto'); }
+    else if (ch.last_check_result === 'rerun') { dotState = 'rerun'; dotTitle = 'Rerun rilevata; registrazione saltata'; }
+    else if (ch.last_status === 'private' || ch.last_check_result === 'private') { dotState = 'private'; dotTitle = 'Live privata'; }
+    else if (ch.online || ch.last_status === 'online') { dotState = 'online'; dotTitle = 'Online'; }
+    else if (ch.last_status === 'offline' && ch.last_check_result === 'offline') { dotState = 'offline'; dotTitle = 'Offline confermato'; }
+    const dot = card.querySelector('[data-part="state-dot"]');
+    dot.className = `live-state-dot ${dotState}`; dot.title = dotTitle; dot.setAttribute('aria-label', dotTitle);
+
+    const q = card.querySelector('[data-action="quality"]');
+    const optionValues = Array.from(q.options).map(o => o.value);
+    if (optionValues.join('|') !== qualityOpts.join('|')) {
+      const selected = ch.quality || qualityOpts[0] || 'best';
+      q.replaceChildren(...qualityOpts.map(value => { const o=document.createElement('option'); o.value=value; o.textContent=value; return o; }));
+      q.value = selected;
+    } else if (document.activeElement !== q && q.value !== ch.quality) q.value = ch.quality;
+    q.title = `Qualità corrente: ${ch.quality || 'best'}. Cambiare qualità durante REC apre un nuovo file.`;
+
+    const liveBtn = card.querySelector('[data-action="live"]');
+    liveBtn.title = ch.online ? 'Guarda la live; durante REC usa il flusso condiviso' : 'Prova ad aprire il flusso live';
+    const onceBtn = card.querySelector('[data-action="single-live"]');
+    onceBtn.className = `ch-btn btn-single-live${ch.single_live_mode?' active':''}`;
+    onceBtn.title = ch.single_live_mode
+      ? 'Una volta è attiva. Dopo la fine della live attende 2 ore; se torna online, registra la successiva. Clicca per disattivare.'
+      : 'Attiva Una volta anche da Pausa: registra la live corrente o la prossima; dopo 2 ore senza nuove live mette in pausa.';
+    onceBtn.querySelector('i').className = `bi ${ch.single_live_mode?'bi-clock-fill':'bi-clock'}`;
+    const sleepBtn = card.querySelector('[data-action="sleep"]');
+    const sleepTitle = ch.sleeping ? 'Risveglia: riattiva il monitor senza iniziare REC' : 'A dormire: ferma REC e sospende tutti i controlli automatici';
+    sleepBtn.className = `ch-btn btn-sleep${ch.sleeping?' active':''}`;
+    sleepBtn.title = sleepTitle; sleepBtn.setAttribute('aria-label', sleepTitle);
+    sleepBtn.querySelector('i').className = `bi ${ch.sleeping?'bi-moon-stars-fill':'bi-moon'}`;
+    const recBtn = card.querySelector('[data-action="record-toggle"]');
+    recBtn.disabled = !!ch.sleeping;
+    recBtn.className = `ch-btn ${ch.is_recording?'btn-pause':'btn-play'}`;
+    recBtn.title = ch.sleeping ? 'Prima risveglia il canale con la luna' : ch.is_recording ? 'Metti in pausa la registrazione; il monitor continua' : 'Riprendi la registrazione';
+    recBtn.querySelector('i').className = `bi ${ch.is_recording?'bi-pause-fill':'bi-play-fill'}`;
+    const forceBtn = card.querySelector('[data-action="force-check"]');
+    forceBtn.disabled = !!ch.sleeping;
+    forceBtn.title = ch.sleeping ? 'Controllo sospeso: risveglia il canale per controllarlo' : 'Forza subito un controllo';
+    const removeBtn = card.querySelector('[data-action="remove"]');
+    removeBtn.title = `Rimuovi ${ch.name}`;
+  }
+
+  function renderChannels(channels, config = {}, forceReorder = false) {
+    const list = document.getElementById('chList');
+    const term = (searchInput?.value || '').trim().toLocaleLowerCase();
+    const matchesFilter = ch => {
+      const privateRoom = ch.last_status === 'private' || ch.last_check_result === 'private';
+      switch (currentFilter) {
+        case 'online': return !!ch.online && !ch.sleeping;
+        case 'recording': return !!ch.actually_recording;
+        case 'not_paused': return !!ch.is_recording && !ch.sleeping && !privateRoom;
+        case 'paused': return !ch.is_recording && !ch.sleeping && !privateRoom;
+        case 'sleeping': return !!ch.sleeping;
+        case 'private': return privateRoom;
+        case 'rerun': return !ch.sleeping && (ch.last_status === 'rerun' || ch.last_check_result === 'rerun');
+        case 'offline': return !ch.sleeping && !privateRoom && !ch.online && ch.last_status === 'offline' && ch.last_check_result === 'offline';
+        case 'uncertain': return !ch.sleeping && (['verifying_offline','error','checking'].includes(ch.last_check_result) || ch.last_status === 'unknown');
+        default: return true;
+      }
+    };
+    const filtered = channels.filter(ch => matchesFilter(ch) && (!term || `${ch.name} ${ch.platform||''} ${ch.platform_label||''} ${ch.platform_short||''}`.toLocaleLowerCase().includes(term)));
+    const total = channels.length;
+    document.getElementById('chCount').textContent = (term || currentFilter !== 'all') ? `${filtered.length}/${total}` : total;
+    const empty = list.querySelector('.empty-state');
+    if (!filtered.length) {
+      if (term || currentFilter !== 'all') {
+        for (const row of channelRows.values()) row.hidden = true;
+      } else {
+        for (const [name,row] of channelRows) { row.remove(); channelRows.delete(name); }
+      }
+      if (!empty) {
+        const emptyRow = document.createElement('div');
+        emptyRow.className = 'empty-state';
+        emptyRow.innerHTML = `<i class="bi bi-${total?'search':'tv'}"></i><p>${total?'Nessun canale corrisponde alla ricerca o al filtro':'Nessun canale — aggiungine uno!'}</p>`;
+        list.appendChild(emptyRow);
+      } else {
+        empty.querySelector('p').textContent = total ? 'Nessun canale corrisponde alla ricerca o al filtro' : 'Nessun canale — aggiungine uno!';
+      }
+      return;
+    }
+    if (empty) empty.remove();
+    const filteredNames = new Set(filtered.map(ch => ch.name));
+    for (const [name,row] of channelRows) {
+      if (!channels.some(ch => ch.name === name)) { row.remove(); channelRows.delete(name); }
+      else row.hidden = !filteredNames.has(name);
+    }
+    filtered.forEach(ch => {
+      let card = channelRows.get(ch.name);
+      if (!card) { card = makeChannelCard(); channelRows.set(ch.name, card); }
+      card.hidden = false;
+      updateChannelCard(card, ch, config);
+    });
+    // Evita di spostare schede sotto il puntatore o un selettore che ha il focus.
+    // I nodi delle schede restano gli stessi anche quando cambiano stato e dati.
+    const ordered = sortChannels(filtered);
+    const current = Array.from(list.querySelectorAll('.ch-card:not([hidden])')).map(card => card.dataset.name);
+    const desired = ordered.map(ch => ch.name);
+    const orderChanged = current.length !== desired.length || current.some((name,index) => name !== desired[index]);
+    const toolbarFocused = document.activeElement === searchInput || document.activeElement === sortInput || document.activeElement === filterInput;
+    const interactionActive = list.contains(document.activeElement) || toolbarFocused || (Date.now() - lastChannelInteraction < 1200);
+    if (forceReorder || (orderChanged && !interactionActive)) {
+      ordered.forEach(ch => list.appendChild(channelRows.get(ch.name)));
+    } else {
+      // Nuovi canali vengono aggiunti in coda finché l'utente non ha finito di interagire.
+      ordered.forEach(ch => { const row=channelRows.get(ch.name); if (!row.isConnected) list.appendChild(row); });
+      if (orderChanged && !reorderTimer) {
+        reorderTimer = setTimeout(() => {
+          reorderTimer = null;
+          const toolbarStillFocused = document.activeElement === searchInput || document.activeElement === sortInput || document.activeElement === filterInput;
+          if (lastData && !list.contains(document.activeElement) && !toolbarStillFocused) renderChannels(lastData.channels || [], lastData.config || {}, false);
+        }, 1500);
+      }
+    }
   }
 
   function render(d) {
@@ -360,17 +754,30 @@
     document.getElementById("sChannels").textContent = d.stats.total_channels;
     document.getElementById("sOnline").textContent = d.stats.online_channels;
     document.getElementById("sRec").textContent = d.stats.active_recordings;
+    document.getElementById("sPreview").textContent = d.stats.active_previews ?? 0;
     document.getElementById("sFiles").textContent = d.stats.total_files;
     document.getElementById("sSize").textContent = d.stats.total_size_human;
-    document.getElementById("chCount").textContent = d.stats.total_channels;
     document.getElementById("recTotalSize").textContent = d.stats.total_size_human;
     document.getElementById("bulkBtns").style.display = d.channels.length?"":"none";
 
+    const ms = d.stats.monitor_state || (d.stats.monitor_alive ? "ok" : "stopped");
+    const msBadge = document.getElementById("monitorStateBadge");
+    msBadge.className = "monitor-status" + (ms === "degraded" ? " degraded" : ms === "stopped" ? " stopped" : "");
+    msBadge.innerHTML = ms === "ok"
+      ? '<i class="bi bi-check-circle-fill"></i> Monitor operativo'
+      : ms === "degraded"
+        ? '<i class="bi bi-exclamation-triangle-fill"></i> Monitor rallentato'
+        : '<i class="bi bi-x-circle-fill"></i> Monitor fermo';
+    const lastCycle = d.stats.monitor_last_cycle == null ? "in attesa del primo esito" : `ultimo controllo completato ${uptime(d.stats.monitor_last_cycle)} fa`;
+    document.getElementById("monitorDetails").textContent = `${lastCycle} · worker max ${d.stats.monitor_workers} · richieste in corso ${d.stats.monitor_inflight}${d.stats.monitor_inflight_oldest ? ` (più vecchia: ${uptime(d.stats.monitor_inflight_oldest)})` : ""}`;
+
     if (d.config) {
-      const cpOn = d.config.check_paused_rooms;
       document.getElementById("configTags").innerHTML = [
         d.config.notify_type!=='none'?`<span class="config-tag on">${esc(d.config.notify_type.toUpperCase())}</span>`:'',
-        `<span class="config-tag clickable ${cpOn?'on':''}" onclick="toggleCheckPaused()" title="Controlla canali in pausa: ${cpOn?'ON':'OFF'}">CHECK PAUSA ${cpOn?'ON':'OFF'}</span>`,
+        d.config.auto_convert?'<span class="config-tag on" title="Remux automatico dei TS conclusi in MP4, senza ricodifica">MP4 AUTO</span>':'',
+        d.config.auto_convert && d.config.delete_after_convert?'<span class="config-tag" title="Il TS viene eliminato solo dopo una conversione MP4 riuscita">TS ELIMINATO DOPO MP4</span>':'',
+        d.config.dedup_enabled?'<span class="config-tag on" title="Deduplicazione attiva sui file conclusi">DEDUP</span>':'',
+        '<span class="config-tag" title="La pausa normale mantiene attivo il monitor; la luna sospende i controlli del singolo canale">PAUSA = MONITOR ATTIVO · LUNA = MONITOR SOSPESO</span>',
       ].join('');
     }
 
@@ -389,30 +796,75 @@
 
     qualityOpts = d.quality_options||[];
 
-    const sorted = sortChannels(d.channels);
-    const cl = document.getElementById("chList");
-    if (!sorted.length) { cl.innerHTML='<div class="empty-state"><i class="bi bi-tv"></i><p>Nessun canale — aggiungine uno!</p></div>'; }
-    else {
-      cl.innerHTML = sorted.map(ch => {
-        const online = ch.online?'<span class="badge-sm badge-online"><span class="dot-rec" style="background:var(--online);animation:none;width:5px;height:5px"></span>Online</span>':'<span class="badge-sm badge-offline">Offline</span>';
-        let rb; if(ch.actually_recording){rb=`<span class="badge-sm badge-rec"><span class="dot-rec"></span>REC</span>`;if(ch.uptime)rb+=`<span class="uptime-tag">${uptime(ch.uptime)}</span>`;}else if(ch.is_recording){rb='<span class="badge-sm badge-waiting">In attesa</span>';}else{rb='<span class="badge-sm badge-paused">Pausa</span>';}
-        const qo=qualityOpts.map(q=>`<option value="${q}"${q===ch.quality?' selected':''}>${q}</option>`).join('');
-        const tb=ch.is_recording?`<button class="ch-btn btn-pause" onclick="chAction('pause','${esc(ch.name)}','${esc(ch.platform)}')"><i class="bi bi-pause-fill"></i></button>`:`<button class="ch-btn btn-play" onclick="chAction('resume','${esc(ch.name)}','${esc(ch.platform)}')"><i class="bi bi-play-fill"></i></button>`;
-        const liveBtn=ch.actually_recording?`<button type="button" class="ch-btn btn-play" onclick="openLive('${esc(ch.name)}','${esc(ch.platform)}')" title="Guarda la diretta"><i class="bi bi-broadcast"></i> Guarda live</button>`:"";
-        const plat=`<span class="plat-badge">${esc(ch.platform_label||ch.platform||'')}</span>`;
-        const lc=ch.last_checked!=null?`<span class="uptime-tag" title="Ultimo check">${uptime(ch.last_checked)} fa</span>`:'<span class="uptime-tag" style="color:var(--rec)">mai</span>';
-        return `<div class="ch-card" data-name="${esc(ch.name)}"><div class="ch-top"><div class="ch-name-row"><a href="${esc(ch.home_url||('https://twitch.tv/'+ch.name))}" target="_blank" class="ch-name">${esc(ch.name)}</a><div class="ch-badges">${plat}${online}${rb}${lc}</div></div></div><div class="ch-bottom"><div class="ch-quality-row"><span class="ch-quality-label">Qualità:</span><select class="ch-quality-select" onchange="setQuality('${esc(ch.name)}',this.value,'${esc(ch.platform)}')">${qo}</select></div><div class="ch-actions">${liveBtn}${tb}<button class="ch-btn" onclick="forceCheck('${esc(ch.name)}','${esc(ch.platform)}')" title="Controlla ora"><i class="bi bi-arrow-clockwise"></i></button><button class="ch-btn btn-del" onclick="confirmRemoveCh('${esc(ch.name)}','${esc(ch.platform)}')"><i class="bi bi-trash3"></i></button></div></div></div>`;
-      }).join('');
-    }
+    renderChannels(d.channels || [], d.config || {});
 
-    const rl = document.getElementById("recList");
-    if (!d.recordings.length) { rl.innerHTML='<div class="empty-state"><i class="bi bi-inbox"></i><p>Nessuna registrazione</p></div>'; }
-    else {
-      rl.innerHTML = d.recordings.map(f => {
-        const del=f.in_use?'<div class="rec-btn" style="opacity:.3;cursor:not-allowed" title="In registrazione"><i class="bi bi-lock-fill"></i></div>':`<div class="rec-btn del" onclick="confirmDeleteFile('${esc(f.name)}')"><i class="bi bi-trash3"></i></div>`;
-        const rt=f.in_use?'<span class="badge-sm badge-rec" style="margin-left:6px;font-size:.55rem"><span class="dot-rec" style="width:4px;height:4px"></span>REC</span>':'';
-        return `<div class="rec-item"><div class="rec-info"><span class="rec-name">${esc(f.name)}${rt}</span><span class="rec-meta">${f.size_human} &middot; ${f.modified}</span></div><div class="rec-actions"><div class="rec-btn"><a href="/recordings/${encodeURIComponent(f.name)}" download><i class="bi bi-download"></i></a></div>${del}</div></div>`;
-      }).join('');
+    renderRecordings(d.recordings || []);
+  }
+
+  // Aggiorna le righe delle registrazioni in modo incrementale: niente rebuild dell'intera lista
+  // ad ogni evento SSE, così il DOM, i pulsanti e la posizione di scroll restano stabili.
+  function createRecordingRow() {
+    const row = document.createElement("div");
+    row.className = "rec-item";
+
+    const info = document.createElement("div"); info.className = "rec-info";
+    const name = document.createElement("span"); name.className = "rec-name";
+    const nameText = document.createTextNode(""); name.appendChild(nameText);
+    const badge = document.createElement("span");
+    badge.className = "badge-sm badge-rec"; badge.style.cssText = "margin-left:6px;font-size:.55rem";
+    const dot = document.createElement("span"); dot.className = "dot-rec"; dot.style.cssText = "width:4px;height:4px";
+    badge.appendChild(dot); badge.appendChild(document.createTextNode("REC")); badge.style.display = "none";
+    name.appendChild(badge);
+    const meta = document.createElement("span"); meta.className = "rec-meta";
+    info.append(name, meta);
+
+    const actions = document.createElement("div"); actions.className = "rec-actions";
+    const downloadBox = document.createElement("div"); downloadBox.className = "rec-btn";
+    const link = document.createElement("a"); link.download = "";
+    const downloadIcon = document.createElement("i"); downloadIcon.className = "bi bi-download";
+    link.appendChild(downloadIcon); downloadBox.appendChild(link);
+    const remove = document.createElement("div"); remove.className = "rec-btn del";
+    const removeIcon = document.createElement("i"); removeIcon.className = "bi bi-trash3"; remove.appendChild(removeIcon);
+    remove.addEventListener("click", () => {
+      if (row.dataset.inUse === "true") return;
+      window.confirmDeleteFile(row.dataset.filename || "");
+    });
+    actions.append(downloadBox, remove); row.append(info, actions);
+    row._nameText = nameText; row._badge = badge; row._meta = meta;
+    row._link = link; row._remove = remove; row._removeIcon = removeIcon;
+    return row;
+  }
+
+  function renderRecordings(files) {
+    const list = document.getElementById("recList");
+    if (!files.length) {
+      for (const row of recordingRows.values()) row.remove();
+      recordingRows.clear();
+      if (!list.querySelector(".empty-state")) list.innerHTML = '<div class="empty-state"><i class="bi bi-inbox"></i><p>Nessuna registrazione</p></div>';
+      return;
+    }
+    const empty = list.querySelector(".empty-state"); if (empty) empty.remove();
+    const seen = new Set();
+    files.forEach((file, index) => {
+      seen.add(file.name);
+      let row = recordingRows.get(file.name);
+      if (!row) { row = createRecordingRow(); recordingRows.set(file.name, row); }
+      row.dataset.filename = file.name;
+      row.dataset.inUse = file.in_use ? "true" : "false";
+      row._nameText.nodeValue = file.name;
+      row._badge.style.display = file.in_use ? "inline-flex" : "none";
+      row._meta.textContent = `${file.size_human} · ${file.modified}`;
+      row._link.href = `/recordings/${encodeURIComponent(file.name)}`;
+      row._remove.className = "rec-btn" + (file.in_use ? "" : " del");
+      row._remove.title = file.in_use ? "In registrazione" : "Elimina registrazione";
+      row._remove.style.opacity = file.in_use ? ".3" : "";
+      row._remove.style.cursor = file.in_use ? "not-allowed" : "pointer";
+      row._removeIcon.className = file.in_use ? "bi bi-lock-fill" : "bi bi-trash3";
+      const current = list.children[index];
+      if (current !== row) list.insertBefore(row, current || null);
+    });
+    for (const [name, row] of recordingRows) {
+      if (!seen.has(name)) { row.remove(); recordingRows.delete(name); }
     }
   }
 
@@ -424,12 +876,23 @@
     else if(s==="connecting"){dot.classList.add("connecting");lbl.textContent="Connessione…";}
     else{dot.classList.add("disconnected");lbl.textContent="Disconnesso";}
   }
+  let authProbeInFlight = false;
+  async function checkSessionAfterSseError() {
+    if (authProbeInFlight) return;
+    authProbeInFlight = true;
+    try {
+      const response = await fetch("/api/status", {credentials:"same-origin", cache:"no-store"});
+      if (response.status === 401) goToLogin();
+    } catch (_) {
+      // Un errore di rete non significa che la sessione sia scaduta: il reconnect SSE riprova.
+    } finally { authProbeInFlight = false; }
+  }
   function connectSSE() {
     if(evtSource)evtSource.close(); setSseStatus("connecting");
     evtSource=new EventSource("/api/stream");
     ["status","update","cycle_complete","action"].forEach(e=>evtSource.addEventListener(e,ev=>{try{render(JSON.parse(ev.data));setSseStatus("connected");}catch{}}));
     evtSource.onopen=()=>setSseStatus("connected");
-    evtSource.onerror=()=>{setSseStatus("disconnected");evtSource.close();if(reconnectTimer)clearTimeout(reconnectTimer);reconnectTimer=setTimeout(connectSSE,3000);};
+    evtSource.onerror=()=>{setSseStatus("disconnected");evtSource.close();void checkSessionAfterSseError();if(reconnectTimer)clearTimeout(reconnectTimer);reconnectTimer=setTimeout(connectSSE,3000);};
   }
 
   // ── Actions (AJAX) ──
@@ -443,39 +906,39 @@
     if(r.ok)document.getElementById("addChannel").value="";
   });
 
-  window.chAction=async(action,name,platform)=>api("/api/room",{action,channel:name,platform});
+  window.chAction=async(action,name,platform)=>{const r=await api("/api/room",{action,channel:name,platform});if(!r.ok)toast(r.msg||"Operazione non riuscita","warning");return r;};
+  window.toggleSleep=async(name,platform)=>{const r=await api("/api/room",{action:"toggle_sleep",channel:name,platform});toast(r.msg||(r.ok?"Stato sonno aggiornato":"Errore"),r.ok?"success":"warning");return r;};
+  window.toggleSingleLive=async(name,platform)=>{const r=await api("/api/room",{action:"toggle_single_live",channel:name,platform});toast(r.msg||(r.ok?"Modalità Una volta aggiornata":"Errore"),r.ok?"success":"warning");return r;};
   window.setQuality=async(name,q,platform)=>api("/api/room",{action:"set_quality",channel:name,quality:q,platform});
   window.bulkAction=async(action)=>api("/api/room",{action});
-  window.forceCheck=async(name,platform)=>{await api("/api/check",{channel:name});toast("Check richiesto");};
-  window.toggleCheckPaused=async()=>{const r=await api("/api/toggle_check_paused",{});toast(`Check canali in pausa: ${r.check_paused_rooms?'ON':'OFF'}`);};
+  window.forceCheck=async(name,platform)=>{await api("/api/check",{channel:name});toast("Controllo prioritario accodato");};
+  window.forceCheckAll=async()=>{const r=await api("/api/check",{});toast(`Controlli prioritari accodati: ${r.queued||0}`);};
 
-  // ── Anteprima della registrazione in corso ──
-  let _mts=null, _liveRestart=null;
+  // ── Player live indipendente dalla registrazione ──
+  let _mts=null;
   function _previewStatus(text,show){const s=document.getElementById("previewStatus");document.getElementById("previewStatusText").textContent=text||"";s.style.display=show?"flex":"none";}
   function _destroyPlayer(){
-    clearTimeout(_liveRestart); _liveRestart=null;
     const vid=document.getElementById("previewVideo");
     vid.onloadedmetadata=vid.onplaying=vid.onerror=vid.onended=null;
     if(_mts){try{_mts.destroy();}catch{} _mts=null;}
     try{vid.pause();vid.removeAttribute("src");vid.load();}catch{}
   }
-  function openPlayer(title,url,isLive,isTs,onLiveEnd){
+  function openPlayer(title,url,isLive,isTs){
     _destroyPlayer();
     const vid=document.getElementById("previewVideo");
     document.getElementById("previewTitle").textContent=title;
     document.getElementById("previewNote").textContent=isLive
-      ?"Anteprima della parte finale della registrazione, con circa 8 secondi di buffer. Audio e video provengono dallo stesso file."
+      ?"Flusso live diretto e indipendente dalla registrazione. Non viene creato alcun file; chiudendo il player, la connessione temporanea viene terminata."
       :"Riproduzione della registrazione. Se il formato non è supportato dal browser, scarica il file.";
     document.getElementById("previewModal").classList.add("open");
     _previewStatus("Caricamento…",true);
-    const error=isLive?"Anteprima non disponibile: la registrazione potrebbe essere appena iniziata o terminata. Chiudi e riprova.":"Impossibile riprodurre nel browser — usa il download.";
+    const error=isLive?"Flusso live non disponibile. Verifica che la diretta sia online e riprova.":"Impossibile riprodurre nel browser — usa il download.";
     const play=()=>vid.play().catch(()=>_previewStatus("Premi Play nel video per avviare.",true));
     vid.onplaying=()=>_previewStatus("",false);
     vid.onerror=()=>_previewStatus(error,true);
     vid.onended=()=>{
       if(isLive){
-        _previewStatus("Registrazione terminata o cambio file…",true);
-        if(onLiveEnd)_liveRestart=setTimeout(onLiveEnd,1000);
+        _previewStatus("Il flusso live è terminato.",true);
       }
     };
     if(isTs && window.mpegts && mpegts.isSupported()){
@@ -496,11 +959,7 @@
       vid.src=url;
     }
   }
-  window.openLive=(name,platform)=>openPlayer(name+" • LIVE","/live/"+encodeURIComponent(platform||"twitch")+"/"+encodeURIComponent(name),true,true,()=>{
-    const ch=lastData?.channels.find(c=>c.name===name && (c.platform||"twitch")===(platform||"twitch"));
-    if(ch?.actually_recording)window.openLive(name,platform);
-    else _previewStatus("Registrazione terminata. Il video completo è nella sezione Registrazioni.",true);
-  });
+  window.openLive=(name,platform)=>openPlayer(name+" • LIVE","/live/"+encodeURIComponent(platform||"twitch")+"/"+encodeURIComponent(name),true,true);
   window.closePreview=()=>{
     _destroyPlayer();
     document.getElementById("previewModal").classList.remove("open");
@@ -520,7 +979,7 @@
   document.getElementById("importFile").addEventListener("change",async function(){
     const file=this.files[0]; if(!file)return;
     const res=document.getElementById("importResult");
-    try{const fd=new FormData();fd.append("file",file);const r=await fetch("/api/import",{method:"POST",body:fd});const d=await r.json();if(r.ok){res.className="import-result ok";res.textContent=`Importati ${d.imported} canali, ${d.skipped} saltati.`;setTimeout(()=>closeConfirm("importModal"),2000);}else{res.className="import-result err";res.textContent=d.error||"Errore";}}
+    try{const fd=new FormData();fd.append("file",file);const csrf=document.querySelector('meta[name="csrf-token"]')?.content||'';const r=await fetch("/api/import",{method:"POST",headers:{"X-CSRF-Token":csrf},body:fd});if(r.status===401){goToLogin();return;}const d=await r.json();if(r.ok){res.className="import-result ok";res.textContent=`Importati ${d.imported} canali, ${d.skipped} saltati.`;setTimeout(()=>closeConfirm("importModal"),2000);}else{res.className="import-result err";res.textContent=d.error||"Errore";}}
     catch(e){res.className="import-result err";res.textContent="Errore: "+e.message;}
     this.value="";
   });
@@ -528,8 +987,8 @@
   document.addEventListener("keydown",e=>{if(e.key==="Escape"){closeConfirm("confirmRemove");closeConfirm("confirmDelete");closeConfirm("importModal");}});
   ["confirmRemove","confirmDelete","importModal"].forEach(id=>document.getElementById(id).addEventListener("click",e=>{if(e.target.id===id)closeConfirm(id);}));
 
-  if(typeof EventSource!=="undefined"){connectSSE();setInterval(async()=>{try{const r=await fetch("/api/status");if(r.ok)render(await r.json());}catch{}},30000);}
-  else{(async()=>{try{const r=await fetch("/api/status");if(r.ok)render(await r.json());}catch{}})();setInterval(async()=>{try{const r=await fetch("/api/status");if(r.ok)render(await r.json());}catch{}},8000);}
+  if(typeof EventSource!=="undefined"){connectSSE();setInterval(async()=>{try{const r=await fetch("/api/status");if(r.status===401){goToLogin();return;}if(r.ok)render(await r.json());}catch{}},30000);}
+  else{(async()=>{try{const r=await fetch("/api/status");if(r.status===401){goToLogin();return;}if(r.ok)render(await r.json());}catch{}})();setInterval(async()=>{try{const r=await fetch("/api/status");if(r.status===401){goToLogin();return;}if(r.ok)render(await r.json());}catch{}},8000);}
 })();
 </script>
 </body>

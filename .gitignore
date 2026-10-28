@@ -15,3 +15,8 @@ recordings/
 *.swp
 .DS_Store
 docker-compose.override.yml
+
+# Persistent secret and optional deduplication index
+.twitch-recorder-session-secret
+dedup_hashes.json
+dedup_hashes.json.tmp

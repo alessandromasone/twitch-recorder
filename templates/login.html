@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="it" data-bs-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Accesso · Twitch Recorder</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg', v='1') }}">
+  <meta name="csrf-token" content="{{ csrf_token_value }}">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root { color-scheme: dark; --bg:#111114; --card:#1d1d22; --field:#26262d; --border:#34343d; --text:#f4f4f5; --muted:#a1a1aa; --accent:#9146ff; --accent-hover:#7c3aed; --danger:#f87171; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:24px; background:radial-gradient(ellipse at top,rgba(145,70,255,.13),transparent 42%),var(--bg); color:var(--text); font-family:'DM Sans',system-ui,sans-serif; }
+    .login-card { width:min(100%,390px); padding:32px; border:1px solid var(--border); border-radius:18px; background:rgba(29,29,34,.96); box-shadow:0 24px 70px rgba(0,0,0,.28); }
+    .brand { display:flex; align-items:center; gap:12px; margin-bottom:28px; font-size:1.1rem; font-weight:700; letter-spacing:-.02em; }
+    .brand-icon { width:44px; height:44px; display:grid; place-items:center; border-radius:12px; color:#fff; background:var(--accent); font-size:1.25rem; }
+    h1 { margin:0 0 7px; font-size:1.5rem; letter-spacing:-.04em; }
+    .intro { margin:0 0 24px; color:var(--muted); font-size:.9rem; line-height:1.5; }
+    label { display:block; margin-bottom:8px; font-size:.82rem; font-weight:600; }
+    input[type=password] { width:100%; min-height:46px; padding:11px 13px; border:1px solid var(--border); border-radius:9px; outline:none; background:var(--field); color:var(--text); font:inherit; }
+    input[type=password]:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(145,70,255,.16); }
+    button { width:100%; margin-top:17px; min-height:45px; border:0; border-radius:9px; background:var(--accent); color:white; font:inherit; font-weight:700; cursor:pointer; transition:background .15s,transform .1s; }
+    button:hover { background:var(--accent-hover); } button:active { transform:scale(.99); }
+    .error { margin:0 0 17px; padding:10px 12px; border:1px solid rgba(248,113,113,.3); border-radius:8px; background:rgba(248,113,113,.08); color:var(--danger); font-size:.83rem; line-height:1.4; }
+    .foot { margin:22px 0 0; text-align:center; color:var(--muted); font-size:.74rem; }
+    @media(max-width:420px) { .login-card { padding:25px 21px; } }
+  </style>
+</head>
+<body>
+  <main class="login-card">
+    <div class="brand"><span class="brand-icon"><i class="bi bi-camera-video-fill" aria-hidden="true"></i></span><span>Twitch Recorder</span></div>
+    <h1>Accedi</h1>
+    <p class="intro">Inserisci la password per accedere al pannello di controllo.</p>
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+    <form action="{{ url_for('login') }}" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token_value }}">
+      <input type="hidden" name="next" value="{{ next_path }}">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+      <button type="submit">Entra <i class="bi bi-arrow-right-short" aria-hidden="true"></i></button>
+    </form>
+    <p class="foot">Accesso protetto</p>
+  </main>
+</body>
+</html>

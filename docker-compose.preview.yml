@@ -1,0 +1,51 @@
+services:
+  twitch-recorder-preview:
+    image: ghcr.io/${GITHUB_USER:-alessandromasone}/twitch-recorder:preview
+    container_name: twitch-recorder-preview
+    restart: unless-stopped
+    networks:
+      - preview-network
+    ports:
+      - "${PREVIEW_PORT:-5001}:5000"
+    volumes:
+      - recorder-preview-data:/data
+    environment:
+      - APP_PASSWORD=${APP_PASSWORD:-}
+      - SECRET_KEY=${SECRET_KEY:-}
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
+      - APP_SESSION_HOURS=${APP_SESSION_HOURS:-12}
+      - AUTO_CONVERT=${AUTO_CONVERT:-false}
+      - DELETE_AFTER_CONVERT=${DELETE_AFTER_CONVERT:-false}
+      - DEDUP_ENABLED=${DEDUP_ENABLED:-false}
+      - DEDUP_BYTES=${DEDUP_BYTES:-2097152}
+      - DEDUP_FILE=${DEDUP_FILE:-}
+      - STREAM_QUALITY=${STREAM_QUALITY:-best}
+      - SKIP_RERUNS=${SKIP_RERUNS:-false}
+      - TWITCH_CLIENT_ID=${TWITCH_CLIENT_ID:-}
+      - TWITCH_CLIENT_SECRET=${TWITCH_CLIENT_SECRET:-}
+      - SKIP_TWITCH_ADS=${SKIP_TWITCH_ADS:-true}
+      - CHECK_INTERVAL=${CHECK_INTERVAL:-60}
+      - MONITOR_WORKERS=${MONITOR_WORKERS:-2}
+      - ONLINE_CHECK_INTERVAL=${ONLINE_CHECK_INTERVAL:-30}
+      - OFFLINE_CHECK_INTERVAL=${OFFLINE_CHECK_INTERVAL:-60}
+      - ERROR_CHECK_INTERVAL=${ERROR_CHECK_INTERVAL:-120}
+      - OFFLINE_CONFIRMATIONS=${OFFLINE_CONFIRMATIONS:-3}
+      - OFFLINE_CONFIRM_INTERVAL=${OFFLINE_CONFIRM_INTERVAL:-5}
+      - RECORDER_OFFLINE_GRACE_SECONDS=${RECORDER_OFFLINE_GRACE_SECONDS:-15}
+      - LIVE_STREAM_BUFFER_BYTES=${LIVE_STREAM_BUFFER_BYTES:-4194304}
+      - MAX_FILE_SIZE=${MAX_FILE_SIZE:-1932735283}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  preview-network:
+    name: twitch-recorder-preview-network
+
+volumes:
+  recorder-preview-data:
+    name: twitch-recorder-preview-data
+    driver: local

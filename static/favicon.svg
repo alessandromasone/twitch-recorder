@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Twitch Recorder">
+  <rect width="64" height="64" rx="14" fill="#9146ff"/>
+  <path d="M17 13h34v25L39 50H28l-7 7V50h-4V13zm7 7v22h8v7l7-7h5V20H24z" fill="#fff"/>
+  <path d="M31 25h4v10h-4zm8 0h4v10h-4z" fill="#9146ff"/>
+</svg>

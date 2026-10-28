@@ -1,10 +1,132 @@
-Versione aggiornata: anteprima dalla registrazione in corso
+Versione aggiornata — esclusione rerun e configurazione annunci
 
-- Guarda live accanto al canale, solo durante la registrazione.
-- Preview dalla coda TS in crescita; buffer indicativo 8-10 secondi.
-- Nessun secondo flusso e nessuna conversione MP4 per la preview.
-- Registrazioni completate: download ed eliminazione, senza player.
+- Aggiunto `SKIP_RERUNS` (disattivato per default) per escludere le rerun Twitch riconosciute tramite tag Helix ufficiale o prefisso del titolo.
+- L'esclusione rerun richiede `TWITCH_CLIENT_ID` e `TWITCH_CLIENT_SECRET`; in caso di verifica incerta il monitor non avvia nuove registrazioni.
+- Le rerun riconosciute hanno stato distinto nella UI, filtro dedicato e non aggiornano `last_live`; una registrazione eventualmente attiva viene fermata.
+- Aggiunto `SKIP_TWITCH_ADS`; Streamlink recente filtra automaticamente gli annunci incorporati, mentre il flag legacy viene passato solo se la versione installata lo supporta.
+- Rimosso l'uso incondizionato di `--twitch-disable-ads`, non più documentato nelle versioni recenti di Streamlink.
+- Aggiornati `.env.example`, Docker Compose Preview/produzione e README.
+- Test statici e unitari isolati eseguiti; il test end-to-end richiede l'ambiente completo con Flask, Streamlink, FFmpeg e credenziali Twitch API.
+
+Versione aggiornata — revisione UI, sessione e gestione file
+
+- Layout desktop allineato a una griglia più proporzionata: canali più ampi delle registrazioni su desktop e liste con scroll indipendente dimensionato in base alla finestra.
+- Scrollbar stabile e anchoring disattivato per evitare salti visivi nelle liste durante gli aggiornamenti.
+- Scadenza sessione configurabile con APP_SESSION_HOURS; se SECRET_KEY non è fornita, una chiave casuale viene conservata nel volume dati per non invalidare le sessioni a ogni riavvio.
+- Export/import conserva lo stato completo di "Una volta", inclusa la scadenza del timer; corretta una sovrascrittura che riportava i campi importati ai valori predefiniti.
+- Aggiunti AUTO_CONVERT (TS→MP4 in copia, disattivato per default), DELETE_AFTER_CONVERT (disattivato: conserva il TS) e DEDUP_ENABLED (disattivato per default).
+- Gestione delle sessioni scadute anche quando EventSource perde autenticazione; il browser torna alla schermata di login preservando il percorso di ritorno.
+- Aggiornata la documentazione e la configurazione Docker per la stessa serie di variabili nella produzione e nella Preview.
+- Controlli statici e test isolati eseguiti; test end-to-end richiede l'ambiente con Flask e Streamlink.
+
+Aggiornamento — ricerca, ordinamento e interfaccia incrementale
+
+- Aggiunta la barra di ricerca live per nome e piattaforma, con ordinamento per priorità, live prima, nome, ultima live e ultimo controllo.
+- Le schede dei canali vengono create una sola volta e aggiornate campo per campo; gli eventi SSE non ricreano più pulsanti o selettori qualità mentre si interagisce.
+- Il riordino automatico viene sospeso durante l'interazione, evitando che un canale si sposti sotto il puntatore o mentre si usa il selettore.
+- La modalità “Una volta” rimane attivabile anche da pausa normale e riabilita la registrazione per la live corrente o successiva.
+- Cambiando qualità durante REC, il file corrente viene finalizzato e viene preparata una nuova sessione con la qualità scelta; i nomi dei file vengono riservati per evitare sovrascritture dovute a cambi ravvicinati.
+- Verificate sintassi Python/JavaScript, YAML Docker Compose e ordinamento/filtraggio con casi isolati. Test end-to-end con Flask/Streamlink/FFmpeg e una live reale non eseguito in questo ambiente.
+
+Aggiornamento — login opzionale e filtri rapidi
+
+- Aggiunta una pagina di accesso pulita: impostando `APP_PASSWORD` in `.env`, dashboard, API, player live e registrazioni richiedono una sessione autenticata; se `APP_PASSWORD` è vuota l'app resta senza password.
+- Le sessioni durano fino a 12 ore, i cookie sono HttpOnly e SameSite=Lax; le richieste di modifica usano un token CSRF e i tentativi di login sono limitati.
+- Aggiunte le variabili `APP_PASSWORD`, `SECRET_KEY` e `SESSION_COOKIE_SECURE` a `.env.example` e a Docker Compose.
+- Aggiunto il menu filtri: tutti, online, REC, non in pausa, pausa, a dormire, private, offline confermati e stati da verificare.
+- Il rilevamento privato si attiva soltanto su messaggi espliciti riconosciuti da Streamlink; lo stato privato è distinto da offline e non aggiorna `last_live`.
+- Verificate sintassi Python/JavaScript e YAML Compose. Test HTTP end-to-end non eseguibile perché Flask non è installato nell'ambiente di modifica.
+
+Aggiornamento — stato online/offline indicato solo dal pallino
+
+- Rimossi i badge testuali “Online” e “Offline” dalle schede: il pallino verde/rosso a sinistra del nome comunica già lo stato.
+- Restano visibili gli stati informativi distinti, come “A dormire”, verifica in corso ed errori incerti.
+- La logica di monitoraggio e gli stati confermati non sono stati modificati.
+
+Aggiornamento — pausa normale senza badge ridondante
+
+- Rimossa la dicitura “Pausa · check attivo” dalle schede in pausa normale: il pulsante Play indica già che la registrazione è ferma.
+- La pausa normale continua a lasciare attivo il monitor; la modalità “A dormire” conserva il proprio indicatore perché sospende i controlli.
+
+Aggiornamento — Last live, timestamp ISO-8601 e sigle piattaforma
+
+- Aggiunto `last_live`, aggiornato quando il monitor rileva una risposta online certa; `last_online` resta disponibile come campo compatibile.
+- `Last live` è mostrato in forma relativa nell’elenco canali e al passaggio del mouse mostra la data e l’ora complete.
+- I timestamp salvati in `channels.json` e nell’export JSON/CSV usano ISO-8601 UTC con suffisso `Z`; i vecchi timestamp Unix vengono convertiti automaticamente al caricamento/salvataggio.
+- I badge piattaforma ora mostrano le sigle TW/KI/YT con i colori distintivi di Twitch, Kick e YouTube.
+- Un pallino a sinistra del nome indica online (verde), offline confermato (rosso), verifica/errori (giallo) o canale a dormire (viola); lo stato non ancora noto è grigio.
+- Sintassi Python/JavaScript e file di configurazione verificati; test su servizi live reali non eseguito in questo ambiente.
+
+Versione aggiornata — pausa monitorata e modalità A dormire
+
+- La pausa normale ferma la registrazione ma mantiene attivi i controlli della live.
+- Aggiunto il pulsante con icona luna: sospende registrazione e monitor del singolo canale.
+- Il risveglio riattiva il monitor senza riavviare la registrazione; Play resta esplicito.
+- Lo stato `sleeping` è salvato in channels.json ed è incluso in import/export JSON e CSV.
+- I controlli manuali e automatici ignorano i canali a dormire; risultati già in volo non possono avviare REC dopo l'attivazione della modalità sonno.
+- Rimossa l'ambiguità dell'impostazione globale CHECK_PAUSED_ROOMS, sostituita dal controllo per singolo canale.
+
+Aggiornamento — flusso registrato normalizzato e preview condivisa corretta
+
+- Durante REC, Streamlink continua ad aprire una sola connessione alla sorgente; FFmpeg rimuxa in modalità copia (`-c copy`) e il medesimo flusso MPEG-TS normalizzato viene scritto nel file e pubblicato al buffer della preview.
+- I timestamp vengono riallineati all'inizio di ogni file registrato, evitando che la durata mostrata sia influenzata dal tempo trascorso dall'avvio della live prima di premere REC.
+- FFmpeg reinvia le intestazioni MPEG-TS e usa output a pacchetti scaricati, migliorando l'avvio della preview quando si collega a una registrazione già in corso.
+- Stop manuale, split per dimensione e interruzione della sorgente terminano sia FFmpeg sia Streamlink; restano invariati audio/video originali senza ricodifica.
+- Verificata la sintassi Python e provato il remux con un flusso TS sintetico avente timestamp iniziali distanti: il file risultante parte da timestamp zero e la durata rappresenta solo il contenuto acquisito. Test su live reale non eseguito in questo ambiente.
+
+Aggiornamento — monitor concorrente, conferma offline e preview condivisa
+
+- Il monitor usa un limite configurabile di worker (default 2) e pianifica ogni canale con intervalli diversi per stato online, offline ed errori; i controlli forzati hanno priorità.
+- La fine della live richiede tre risposte offline certe per default; errori/timeout restano stati incerti e non fermano REC. Dopo l'offline confermato viene applicata una breve finestra di tolleranza.
+- `last_online`, `last_checked`, stato confermato, conteggio errori e diagnostica vengono salvati in `channels.json`; l'export importa/esporta i timestamp persistenti.
+- Durante REC lo stesso flusso Streamlink viene scritto sul file e duplicato in un buffer circolare RAM consumato dalla preview, evitando una seconda connessione alla sorgente.
+- A REC ferma, la preview resta indipendente e temporanea; chiudendo il player il sistema ferma FFmpeg e Streamlink e aggiorna il contatore della preview.
+- Il pannello mostra stato live/REC/preview, ultimo controllo, ultimo online, conferme offline, errori, tentativi di riconnessione e stato generale del monitor, con comando per controllare subito tutti i canali.
+- Nuove variabili: `MONITOR_WORKERS`, `ONLINE_CHECK_INTERVAL`, `OFFLINE_CHECK_INTERVAL`, `ERROR_CHECK_INTERVAL`, `OFFLINE_CONFIRMATIONS`, `OFFLINE_CONFIRM_INTERVAL`, `RECORDER_OFFLINE_GRACE_SECONDS`, `LIVE_STREAM_BUFFER_BYTES`.
+- Verificata la sintassi Python e JavaScript e la configurazione YAML; il test con live reali richiede un ambiente con Streamlink, FFmpeg e sorgenti online.
+
+Aggiornamento — anteprima live indipendente dalla registrazione
+
+- Il pulsante «Guarda live» è sempre disponibile, anche se la registrazione è in pausa o disattivata; se la diretta non è raggiungibile, il player mostra un errore senza creare file.
+- L'anteprima non legge più la coda del file `.ts` registrato: apre un flusso temporaneo separato con Streamlink, usando la qualità configurata e lo stesso risolutore del registratore.
+- FFmpeg rimuxa il flusso in MPEG-TS con `-c copy`, senza ricodifica e senza creare file su disco.
+- Quando il player viene chiuso o la connessione termina, FFmpeg e Streamlink vengono terminati e i relativi descrittori chiusi.
+- Verificata la sintassi Python; il test live reale dipende dalla disponibilità di una diretta raggiungibile nell'ambiente di esecuzione.
+
+Aggiornamento — ambiente Docker Preview separato
+
+- Aggiunto un workflow GitHub Actions dedicato al branch `preview`.
+- La build pubblica i tag `preview` e `preview-<commit>` su GHCR senza aggiornare `latest`.
+- Aggiunto `docker-compose.preview.yml` con container, porta predefinita 5001 e volume dati separati dalla produzione.
+- I pull request verso `preview` verificano la build senza pubblicare immagini.
+
+Per avviare la preview dopo la pubblicazione dell'immagine:
+`docker compose -f docker-compose.preview.yml pull && docker compose -f docker-compose.preview.yml up -d`
+
+Aggiornamento — modalità Una volta
+
+- Rinominato il pulsante in "Una volta" e sostituita l'icona con un orologio.
+- Attivando la modalità, il canale viene abilitato alla registrazione e la live viene registrata quando risulta online.
+- Dopo la fine della diretta, il sistema attende 2 ore; se il canale torna online nel frattempo, il timer si azzera e riparte alla fine della live successiva.
+- Se non torna online entro 2 ore, il canale viene messo automaticamente in pausa e la modalità si disattiva: il pulsante torna inattivo.
+- Timer e stato della modalità sono salvati insieme al canale, anche in caso di riavvio.
+- Una pausa/ripresa manuale o un comando globale pausa/riprendi disattiva la modalità, lasciando prevalere l'azione dell'utente.
+
+Per aggiornare: ricostruire il container con `docker compose up -d --build`.
+
+Versione precedente: anteprima dalla registrazione in corso (superata dall’aggiornamento iniziale)
+
+- La preview leggeva dalla coda TS in crescita e compariva solo durante REC.
+- L’anteprima live ora è indipendente dalla registrazione e usa un flusso temporaneo diretto.
 
 Applicazione modifiche dopo la sostituzione dei sorgenti:
 docker compose up -d --build
 Poi ricaricare la pagina del browser.
+
+Aggiornamento — layout desktop e lista registrazioni stabile
+
+- Su schermi larghi, pannello Canali a sinistra e Registrazioni a destra; su schermi piccoli la disposizione verticale rimane invariata. I due elenchi scorrono indipendentemente.
+- La lista registrazioni aggiorna le righe in modo incrementale, senza distruggere e ricreare tutti i nodi DOM a ogni evento SSE; i pulsanti e lo scroll restano stabili.
+- L'ordinamento utilizza il timestamp d'inizio incorporato nei nomi generati, quando disponibile, invece del tempo di modifica che cambia continuamente mentre FFmpeg scrive.
+- Verificata la sintassi Python e JavaScript. Test di interfaccia in browser non eseguito in questo ambiente.
+
