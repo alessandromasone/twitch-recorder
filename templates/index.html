@@ -916,44 +916,134 @@
 
   // ── Player live indipendente dalla registrazione ──
   let _mts=null;
+  let _livePlayback=null;
   function _previewStatus(text,show){const s=document.getElementById("previewStatus");document.getElementById("previewStatusText").textContent=text||"";s.style.display=show?"flex":"none";}
+  function _clearLiveTimer(state,key){if(state&&state[key]){clearTimeout(state[key]);state[key]=null;}}
+  function _endLivePlayback(){
+    const state=_livePlayback;
+    if(state){
+      state.closed=true;
+      for(const key of ["retryTimer","stallTimer","stableTimer"])_clearLiveTimer(state,key);
+    }
+    _livePlayback=null;
+  }
   function _destroyPlayer(){
     const vid=document.getElementById("previewVideo");
-    vid.onloadedmetadata=vid.onplaying=vid.onerror=vid.onended=null;
-    if(_mts){try{_mts.destroy();}catch{} _mts=null;}
+    vid.onloadedmetadata=vid.onplaying=vid.onerror=vid.onended=vid.onwaiting=vid.ontimeupdate=null;
+    if(_mts){const previous=_mts;_mts=null;try{previous.destroy();}catch{}}
     try{vid.pause();vid.removeAttribute("src");vid.load();}catch{}
   }
+  function _scheduleLiveReconnect(state,reason){
+    if(!state||_livePlayback!==state||state.closed||state.retryPending)return;
+    _clearLiveTimer(state,"stallTimer");
+    _clearLiveTimer(state,"stableTimer");
+    if(state.retryCount>=state.maxRetries){
+      state.failed=true;
+      _destroyPlayer();
+      _previewStatus("La preview si è interrotta. Chiudi il player e premi «Guarda live» per riprovare.",true);
+      return;
+    }
+    state.retryCount++;
+    state.retryPending=true;
+    const delay=Math.min(15000,1500*Math.pow(2,state.retryCount-1));
+    _previewStatus(`Interruzione temporanea${reason ? " (" + reason + ")" : ""}: riconnessione ${state.retryCount}/${state.maxRetries} tra ${Math.ceil(delay/1000)} s…`,true);
+    state.retryTimer=setTimeout(()=>{
+      if(_livePlayback!==state||state.closed)return;
+      state.retryPending=false;
+      _attachLiveSource(state);
+    },delay);
+  }
+  function _attachLiveSource(state){
+    if(!state||_livePlayback!==state||state.closed)return;
+    _destroyPlayer();
+    const vid=document.getElementById("previewVideo");
+    state.lastProgress=Date.now();
+    state.hasPlayed=false;
+    const markProgress=()=>{
+      state.lastProgress=Date.now();
+      _clearLiveTimer(state,"stallTimer");
+    };
+    vid.onplaying=()=>{
+      markProgress();
+      // Se il player ha recuperato da solo dopo un gap pubblicitario, annulla
+      // il retry già pianificato per non riaprire inutilmente il flusso.
+      if(state.retryPending){
+        _clearLiveTimer(state,"retryTimer");state.retryPending=false;state.retryCount=0;
+        _clearLiveTimer(state,"stableTimer");
+      }
+      state.hasPlayed=true;
+      state.failed=false;
+      _previewStatus("",false);
+      if(state.retryCount>0&&!state.stableTimer){
+        state.stableTimer=setTimeout(()=>{
+          if(_livePlayback===state&&!state.closed){state.retryCount=0;state.stableTimer=null;}
+        },120000);
+      }
+    };
+    vid.ontimeupdate=markProgress;
+    vid.onwaiting=()=>{
+      if(!state.hasPlayed||state.stallTimer||state.retryPending)return;
+      state.stallTimer=setTimeout(()=>{
+        state.stallTimer=null;
+        if(_livePlayback===state&&!state.closed&&state.hasPlayed&&Date.now()-state.lastProgress>=105000){
+          _scheduleLiveReconnect(state,"flusso fermo, possibile interruzione pubblicitaria");
+        }
+      },110000);
+    };
+    vid.onerror=()=>_scheduleLiveReconnect(state,"errore del player");
+    vid.onended=()=>_scheduleLiveReconnect(state,"flusso terminato");
+    const play=()=>vid.play().catch(()=>_previewStatus("Premi Play nel video per avviare.",true));
+    if(window.mpegts&&mpegts.isSupported()){
+      const player=mpegts.createPlayer({type:"mpegts",isLive:true,url:state.url},
+        {lazyLoad:false, lazyLoadMaxDuration:60, lazyLoadRecoverDuration:20,
+         enableStashBuffer:true, stashInitialSize:384*1024,
+         liveBufferLatencyChasing:false, fixAudioTimestampGap:true,
+         autoCleanupSourceBuffer:true, autoCleanupMaxBackwardDuration:30,
+         autoCleanupMinBackwardDuration:15});
+      _mts=player;
+      player.attachMediaElement(vid);
+      player.on(mpegts.Events.ERROR,(_type,detail)=>{
+        if(_mts!==player)return;
+        _scheduleLiveReconnect(state,detail?String(detail).toLowerCase().replaceAll("_"," "):"errore di decodifica");
+      });
+      player.load();
+      play();
+    }else{
+      _previewStatus("Questo browser non supporta la diretta. Prova un browser con supporto Media Source Extensions.",true);
+    }
+  }
   function openPlayer(title,url,isLive,isTs){
+    _endLivePlayback();
     _destroyPlayer();
     const vid=document.getElementById("previewVideo");
     document.getElementById("previewTitle").textContent=title;
     document.getElementById("previewNote").textContent=isLive
-      ?"Flusso live diretto e indipendente dalla registrazione. Non viene creato alcun file; chiudendo il player, la connessione temporanea viene terminata."
+      ?"Flusso live indipendente dalla registrazione. Durante un'interruzione pubblicitaria il player attende il ritorno del flusso e tenta la riconnessione automatica. Nessun file aggiuntivo viene creato."
       :"Riproduzione della registrazione. Se il formato non è supportato dal browser, scarica il file.";
     document.getElementById("previewModal").classList.add("open");
     _previewStatus("Caricamento…",true);
     const error=isLive?"Flusso live non disponibile. Verifica che la diretta sia online e riprova.":"Impossibile riprodurre nel browser — usa il download.";
+    if(isLive){
+      const state={url,title,retryCount:0,maxRetries:7,retryPending:false,retryTimer:null,stallTimer:null,stableTimer:null,closed:false,failed:false,lastProgress:Date.now(),hasPlayed:false};
+      _livePlayback=state;
+      _attachLiveSource(state);
+      return;
+    }
     const play=()=>vid.play().catch(()=>_previewStatus("Premi Play nel video per avviare.",true));
     vid.onplaying=()=>_previewStatus("",false);
     vid.onerror=()=>_previewStatus(error,true);
-    vid.onended=()=>{
-      if(isLive){
-        _previewStatus("Il flusso live è terminato.",true);
-      }
-    };
+    vid.onended=()=>_previewStatus(error,true);
     if(isTs && window.mpegts && mpegts.isSupported()){
-      _mts=mpegts.createPlayer({type:"mpegts",isLive,url},
-        {lazyLoad:!isLive, lazyLoadMaxDuration:60, lazyLoadRecoverDuration:20,
+      _mts=mpegts.createPlayer({type:"mpegts",isLive:false,url},
+        {lazyLoad:true, lazyLoadMaxDuration:60, lazyLoadRecoverDuration:20,
          enableStashBuffer:true, stashInitialSize:384*1024,
-         liveBufferLatencyChasing:false, fixAudioTimestampGap:false,
-         autoCleanupSourceBuffer:isLive, autoCleanupMaxBackwardDuration:30,
+         liveBufferLatencyChasing:false, fixAudioTimestampGap:true,
+         autoCleanupSourceBuffer:false, autoCleanupMaxBackwardDuration:30,
          autoCleanupMinBackwardDuration:15});
       _mts.attachMediaElement(vid);
       _mts.on(mpegts.Events.ERROR,()=>_previewStatus(error,true));
       _mts.load();
       play();
-    }else if(isLive){
-      _previewStatus("Questo browser non supporta la diretta. Prova un browser con supporto Media Source Extensions.",true);
     }else{
       vid.onloadedmetadata=play;
       vid.src=url;
@@ -961,6 +1051,7 @@
   }
   window.openLive=(name,platform)=>openPlayer(name+" • LIVE","/live/"+encodeURIComponent(platform||"twitch")+"/"+encodeURIComponent(name),true,true);
   window.closePreview=()=>{
+    _endLivePlayback();
     _destroyPlayer();
     document.getElementById("previewModal").classList.remove("open");
   };

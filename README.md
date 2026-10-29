@@ -13,6 +13,7 @@ Dashboard real-time con SSE, notifiche Telegram/Discord, qualità per canale con
 - **Filtri rapidi** — menu per visualizzare solo online, REC attive, canali non in pausa, in pausa, addormentati, privati, rerun escluse, offline confermati oppure canali da verificare.
 - **Esclusione rerun Twitch** — con `SKIP_RERUNS=true`, verifica il tag Twitch ufficiale e il prefisso esplicito del titolo tramite Helix; interrompe/salta la registrazione quando la rerun è confermata. Richiede `TWITCH_CLIENT_ID` e `TWITCH_CLIENT_SECRET`.
 - **Annunci Twitch** — Streamlink recente filtra automaticamente gli annunci incorporati; `SKIP_TWITCH_ADS` mantiene l'opzione esplicita solo per versioni legacy che la supportano. Non può rimuovere con certezza gli overlay pubblicitari della pagina web.
+- **Preview resiliente alle pubblicità** — il player tollera le pause di output di Streamlink durante gli annunci incorporati, corregge i gap dei timestamp audio e tenta la riconnessione dopo errori o stalli; la preview temporanea non crea file e chiude i processi quando chiudi il player.
 - **Login opzionale** — una password impostata con `APP_PASSWORD` protegge dashboard, API, stream live e file registrati; se la variabile è vuota il login è disattivato. Le sessioni hanno durata configurabile, token CSRF e limite ai tentativi errati; la chiave viene conservata nel volume dati se `SECRET_KEY` non è configurata.
 - **Cambio qualità sicuro** — se REC è attiva, il file corrente viene finalizzato e il registratore apre una nuova sessione con la qualità scelta; ogni nome file è riservato per evitare sovrascritture.
 - **Elaborazione file opzionale** — conversione TS→MP4 tramite FFmpeg `-c copy` e deduplicazione dei segmenti conclusi; entrambe disattivate per default, e il TS originale viene conservato anche quando la conversione MP4 è attiva, salvo scelta esplicita.
@@ -65,7 +66,7 @@ Per abilitare l'accesso con password, imposta `APP_PASSWORD` nel file `.env`. È
 
 Per saltare le rerun di Twitch, imposta `SKIP_RERUNS=true` e configura `TWITCH_CLIENT_ID` e `TWITCH_CLIENT_SECRET` di un'app registrata nel [portale sviluppatori Twitch](https://dev.twitch.tv/console/apps). Il monitor usa l'API Helix e considera rerun il tag ufficiale `Rerun` o un titolo che inizi esplicitamente con `Rerun`/`[Rerun]`. Se l'API non è raggiungibile, lo stato viene trattato come incerto: non si avvia una nuova registrazione finché non è possibile verificarlo. Il riconoscimento è specifico per Twitch, perché le altre piattaforme non espongono uno stato rerun uniforme tramite l'integrazione attuale.
 
-`SKIP_TWITCH_ADS=true` conserva il comportamento di filtro esplicito sulle vecchie versioni Streamlink che supportano `--twitch-disable-ads`. Con Streamlink 7.5 o successivo gli annunci incorporati vengono già filtrati automaticamente; questa opzione non garantisce la rimozione di eventuali overlay pubblicitari disegnati nella pagina web.
+`SKIP_TWITCH_ADS=true` conserva il comportamento di filtro esplicito sulle vecchie versioni Streamlink che supportano `--twitch-disable-ads`. Con Streamlink 7.5 o successivo gli annunci incorporati vengono già filtrati automaticamente; durante il filtro, l’output può interrompersi temporaneamente. La preview ora attende fino a `PREVIEW_IDLE_TIMEOUT_SECONDS` e tenta la riconnessione in caso di errore del player. Questa opzione non garantisce la rimozione di eventuali overlay pubblicitari disegnati nella pagina web.
 
 ## Ambiente Preview (tag Docker `preview`)
 
@@ -127,6 +128,8 @@ Tutte le variabili sono opzionali e hanno un valore di default. Si configurano t
 | `OFFLINE_CONFIRM_INTERVAL` | `5` | Secondi tra le verifiche di conferma offline |
 | `RECORDER_OFFLINE_GRACE_SECONDS` | `15` | Attesa aggiuntiva dopo offline confermato prima di fermare REC |
 | `LIVE_STREAM_BUFFER_BYTES` | `4194304` | Dimensione del buffer RAM che il player condivide con REC (4 MiB) |
+| `PREVIEW_STARTUP_TIMEOUT_SECONDS` | `120` | Secondi concessi alla preview per ricevere i primi dati (anche durante un pre-roll) |
+| `PREVIEW_IDLE_TIMEOUT_SECONDS` | `180` | Secondi senza output tollerati durante una live (ad esempio durante una pubblicità incorporata) prima di chiudere la connessione e lasciare al browser la riconnessione |
 | `MAX_FILE_SIZE` | `1932735283` | Dimensione massima file prima dello split (~1.8 GB) |
 | `PORT` | `5000` | Porta del server web |
 | `LOG_LEVEL` | `INFO` | Livello di log (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |

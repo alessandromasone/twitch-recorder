@@ -1,3 +1,11 @@
+Versione aggiornata — preview più resiliente durante gli annunci
+
+- Aumentati i timeout della preview temporanea e condivisa: 120 secondi per ricevere i primi dati e 180 secondi di tolleranza per pause di output durante la live, configurabili tramite `.env`.
+- Il player web ora tenta una riconnessione automatica con backoff limitato dopo errori di decodifica, fine inattesa del flusso o stalli prolungati; il contatore si azzera dopo una riproduzione stabile.
+- Attivata la correzione dei gap dei timestamp audio in mpegts.js, spesso utili quando Streamlink riprende dopo aver filtrato segmenti pubblicitari.
+- La preview temporanea mantiene lo stesso comportamento senza REC e non crea file; la chiusura manuale termina i processi temporanei.
+- Verificata la sintassi Python/JavaScript e i file YAML; test di live reale non disponibile in questo ambiente.
+
 Versione aggiornata — esclusione rerun e configurazione annunci
 
 - Aggiunto `SKIP_RERUNS` (disattivato per default) per escludere le rerun Twitch riconosciute tramite tag Helix ufficiale o prefisso del titolo.

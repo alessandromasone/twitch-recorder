@@ -83,6 +83,10 @@ OFFLINE_CHECK_INTERVAL = max(10, int(os.getenv("OFFLINE_CHECK_INTERVAL", str(max
 ERROR_CHECK_INTERVAL = max(10, int(os.getenv("ERROR_CHECK_INTERVAL", "120")))
 RECORDER_OFFLINE_GRACE_SECONDS = max(0, int(os.getenv("RECORDER_OFFLINE_GRACE_SECONDS", "15")))
 LIVE_STREAM_BUFFER_BYTES = max(512 * 1024, int(os.getenv("LIVE_STREAM_BUFFER_BYTES", str(4 * 1024 * 1024))))
+# Le ads Twitch possono sospendere l'output di Streamlink senza terminare il processo.
+# La preview tollera un avvio senza dati e pause più lunghe prima di chiudere la connessione.
+PREVIEW_STARTUP_TIMEOUT_SECONDS = max(30, min(600, int(os.getenv("PREVIEW_STARTUP_TIMEOUT_SECONDS", "120"))))
+PREVIEW_IDLE_TIMEOUT_SECONDS = max(30, min(900, int(os.getenv("PREVIEW_IDLE_TIMEOUT_SECONDS", "180"))))
 
 # ── Anti-spam ──
 JITTER_MAX         = int(os.getenv("JITTER_MAX", "10"))
@@ -2306,19 +2310,28 @@ def preview_live(platform, room):
         ).start()
 
         def shared_generate():
+            received_data = False
             try:
                 stdout = ffmpeg_proc.stdout
                 if stdout is None:
                     return
                 while True:
+                    # Durante gli annunci Twitch Streamlink può sospendere l'output
+                    # pur mantenendo la connessione viva. Non chiudere il player dopo
+                    # il vecchio timeout breve di 30 secondi.
+                    wait_seconds = PREVIEW_IDLE_TIMEOUT_SECONDS if received_data else PREVIEW_STARTUP_TIMEOUT_SECONDS
                     try:
-                        ready, _, _ = select.select([stdout], [], [], 30)
+                        ready, _, _ = select.select([stdout], [], [], wait_seconds)
                     except (OSError, ValueError):
                         break
                     if not ready:
                         if ffmpeg_proc.poll() is not None:
                             break
-                        logger.warning("Preview condivisa di %s senza dati da 30 secondi: chiusura", room)
+                        phase = "inattiva" if received_data else "senza dati iniziali"
+                        logger.warning(
+                            "Preview condivisa di %s %s per %ss: chiusura della connessione HTTP",
+                            room, phase, wait_seconds,
+                        )
                         break
                     try:
                         chunk = os.read(stdout.fileno(), 64 * 1024)
@@ -2326,6 +2339,7 @@ def preview_live(platform, room):
                         break
                     if not chunk:
                         break
+                    received_data = True
                     yield chunk
             except (GeneratorExit, BrokenPipeError, ConnectionResetError):
                 pass
@@ -2360,6 +2374,7 @@ def preview_live(platform, room):
 
         ffmpeg_cmd = [
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+            "-probesize", "1048576", "-analyzeduration", "1000000",
             "-fflags", "+genpts", "-i", "pipe:0",
             "-map", "0:v?", "-map", "0:a?", "-c", "copy",
             "-avoid_negative_ts", "make_zero", "-mpegts_copyts", "0",
@@ -2392,19 +2407,28 @@ def preview_live(platform, room):
         _preview_ended(platform, room, "temporary")
 
     def generate():
+        received_data = False
         try:
             stdout = ffmpeg_proc.stdout
             if stdout is None:
                 return
             while True:
+                # Streamlink filtra le ads incorporate mettendo in pausa l'output.
+                # Lasciare respirare la sorgente evita che la preview termini proprio
+                # quando la pubblicità sta per finire.
+                wait_seconds = PREVIEW_IDLE_TIMEOUT_SECONDS if received_data else PREVIEW_STARTUP_TIMEOUT_SECONDS
                 try:
-                    ready, _, _ = select.select([stdout], [], [], 30)
+                    ready, _, _ = select.select([stdout], [], [], wait_seconds)
                 except (OSError, ValueError):
                     break
                 if not ready:
                     if ffmpeg_proc.poll() is not None or streamlink_proc.poll() is not None:
                         break
-                    logger.warning("Preview temporanea di %s senza dati da 30 secondi: chiusura", room)
+                    phase = "inattiva" if received_data else "senza dati iniziali"
+                    logger.warning(
+                        "Preview temporanea di %s %s per %ss: chiusura della connessione HTTP",
+                        room, phase, wait_seconds,
+                    )
                     break
                 try:
                     chunk = os.read(stdout.fileno(), 64 * 1024)
@@ -2412,6 +2436,7 @@ def preview_live(platform, room):
                     break
                 if not chunk:
                     break
+                received_data = True
                 yield chunk
         except (GeneratorExit, BrokenPipeError, ConnectionResetError):
             pass
