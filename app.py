@@ -621,6 +621,67 @@ def _streamlink_base_command(platform: str) -> list[str]:
     return cmd
 
 
+def _parse_quality_variant(value: str) -> tuple[int, int | None] | None:
+    """Estrae altezza e FPS dai nomi Streamlink come 720p, 720p60 o 1080p30."""
+    match = re.match(r"^\s*(\d{3,4})p(\d{1,3})?(?:\s|$|\()", str(value), re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return int(match.group(1)), int(match.group(2)) if match.group(2) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _quality_fps_rank(candidate: str, requested: str) -> tuple[float, float]:
+    candidate_parts = _parse_quality_variant(candidate)
+    requested_parts = _parse_quality_variant(requested)
+    candidate_fps = candidate_parts[1] if candidate_parts else None
+    requested_fps = requested_parts[1] if requested_parts else None
+    if requested_fps is None:
+        # Una richiesta senza suffisso FPS preferisce una variante senza suffisso;
+        # in alternativa si avvicina ai 30 FPS prima di salire a 60 FPS.
+        return (0 if candidate_fps is None else 1, abs((candidate_fps or 30) - 30))
+    # Un'etichetta senza FPS esplicito viene trattata come la variante standard a 30 FPS.
+    return (abs((candidate_fps or 30) - requested_fps), 0 if candidate_fps is None else 1)
+
+
+def _select_available_quality(preferred: str, available: list[str]) -> str:
+    """Sceglie la variante più vicina alla richiesta senza abbassare la risoluzione inutilmente."""
+    available = [str(item) for item in available]
+    if not available or preferred in ("best", "worst", "audio_only"):
+        # Lascia a Streamlink la semantica ufficiale degli alias e dell'audio-only.
+        return preferred
+    if preferred in available:
+        return preferred
+
+    target = _parse_quality_variant(preferred)
+    if target:
+        target_height = target[0]
+        parsed = [(name, _parse_quality_variant(name)) for name in available]
+        video = [(name, parts) for name, parts in parsed if parts]
+        same_height = [name for name, parts in video if parts[0] == target_height]
+        if same_height:
+            return min(same_height, key=lambda name: _quality_fps_rank(name, preferred))
+
+        lower_heights = sorted({parts[0] for _, parts in video if parts[0] < target_height}, reverse=True)
+        if lower_heights:
+            chosen_height = lower_heights[0]
+            candidates = [name for name, parts in video if parts[0] == chosen_height]
+            return min(candidates, key=lambda name: _quality_fps_rank(name, preferred))
+
+        # Se non esiste alcuna variante alla risoluzione richiesta o inferiore,
+        # ripiega sulla risoluzione superiore più vicina invece di inventare uno stream.
+        higher_heights = sorted({parts[0] for _, parts in video if parts[0] > target_height})
+        if higher_heights:
+            chosen_height = higher_heights[0]
+            candidates = [name for name, parts in video if parts[0] == chosen_height]
+            return min(candidates, key=lambda name: _quality_fps_rank(name, preferred))
+
+    # Fallback per etichette non standard: non scegliere audio_only per una richiesta video.
+    non_audio = [name for name in available if name != "audio_only"]
+    return non_audio[0] if non_audio else preferred
+
+
 def _resolve_quality(channel_name: str, preferred: str, platform: str = DEFAULT_PLATFORM) -> str:
     try:
         result = subprocess.run(
@@ -628,31 +689,23 @@ def _resolve_quality(channel_name: str, preferred: str, platform: str = DEFAULT_
             capture_output=True, timeout=15,
         )
         if result.returncode != 0:
+            logger.warning("%s: impossibile leggere le qualità disponibili; provo %s direttamente", channel_name, preferred)
             return preferred
 
         info = json.loads(result.stdout)
         available = list(info.get("streams", {}).keys())
-
         if not available:
             return preferred
-        if preferred in available:
-            return preferred
 
-        try:
-            start_idx = QUALITY_OPTIONS.index(preferred)
-        except ValueError:
-            start_idx = 0
-
-        for q in QUALITY_OPTIONS[start_idx:]:
-            if q in available:
-                logger.info("%s: %s non disponibile, uso %s", channel_name, preferred, q)
-                return q
-        for q in reversed(QUALITY_OPTIONS[:start_idx]):
-            if q in available:
-                logger.info("%s: %s non disponibile, uso %s (superiore)", channel_name, preferred, q)
-                return q
-        return "best"
-    except Exception:
+        resolved = _select_available_quality(preferred, available)
+        if resolved != preferred:
+            logger.warning("%s: qualità richiesta %s non disponibile; userò %s (varianti: %s)",
+                           channel_name, preferred, resolved, ", ".join(available))
+        else:
+            logger.info("%s: qualità richiesta %s disponibile; selezione %s", channel_name, preferred, resolved)
+        return resolved
+    except Exception as exc:
+        logger.warning("%s: errore nel rilevamento qualità (%s); provo %s direttamente", channel_name, exc, preferred)
         return preferred
 
 
@@ -1182,13 +1235,14 @@ class Recorder:
     __slots__ = (
         "channel_name", "process", "source_process", "output_path",
         "is_recording", "stop_requested", "_lock", "_thread", "_log_fh",
-        "started_at", "quality", "_split_triggered", "platform",
+        "started_at", "quality", "resolved_quality", "_split_triggered", "platform",
         "shared_stream", "reconnect_attempts", "last_error",
     )
 
     def __init__(self, channel_name: str, quality: str = "best", platform: str = DEFAULT_PLATFORM):
         self.channel_name = channel_name
         self.quality = quality
+        self.resolved_quality: str | None = None
         self.platform = _norm_platform(platform)
         # process = FFmpeg remuxer che alimenta sia il file sia la preview;
         # source_process = unica connessione Streamlink alla piattaforma.
@@ -1255,6 +1309,8 @@ class Recorder:
 
         while not self.stop_requested:
             resolved = _resolve_quality(self.channel_name, self.quality, self.platform)
+            with self._lock:
+                self.resolved_quality = resolved
             self._split_triggered = False
             output_path = os.path.join(RECORDINGS_DIR, _generate_filename(self.channel_name))
             self.output_path = output_path
@@ -1597,9 +1653,10 @@ def _build_status_json() -> dict:
                     rec_stream = rec.shared_stream
                     reconnect_attempts = rec.reconnect_attempts
                     recorder_error = rec.last_error
+                    resolved_quality = rec.resolved_quality
             else:
                 rec_is_recording, rec_uptime, rec_stream = False, 0, None
-                reconnect_attempts, recorder_error = 0, ""
+                reconnect_attempts, recorder_error, resolved_quality = 0, "", None
             ch_list.append({
                 "name": name,
                 "platform": plat,
@@ -1621,6 +1678,7 @@ def _build_status_json() -> dict:
                 "uptime_human": _fmt_duration(rec_uptime) if rec and rec_uptime > 0 else None,
                 "reconnect_attempts": reconnect_attempts,
                 "quality": ch.get("quality", STREAM_QUALITY),
+                "resolved_quality": resolved_quality,
                 "single_live_mode": bool(ch.get("single_live_mode", False)),
                 "single_live_seen_online": bool(ch.get("single_live_seen_online", False)),
                 "single_live_offline_remaining": (
@@ -2550,11 +2608,95 @@ def api_export():
                     headers={"Content-Disposition": "attachment; filename=twitch-channels.json"})
 
 
+def _apply_import_quality_update(channel_name: str, quality: str, platform_hint: str) -> tuple[bool, bool]:
+    """Aggiorna la sola qualità di un canale esistente e ruota la sessione se REC è attiva.
+
+    Ritorna (qualità_modificata, rollover_in_background).
+    """
+    if quality not in QUALITY_OPTIONS:
+        return False, False
+    with _lock:
+        quality_lock = _quality_change_locks.setdefault(channel_name, threading.Lock())
+
+    with quality_lock:
+        with _lock:
+            ch = next((item for item in _channels if item.get("name") == channel_name), None)
+            if not ch or ch.get("quality", STREAM_QUALITY) == quality:
+                return False, False
+            rec = _recorders.get(channel_name)
+            was_recording = bool(rec and rec.is_recording)
+            platform = _norm_platform(ch.get("platform", platform_hint))
+            ch["quality"] = quality
+            if rec:
+                rec.quality = quality
+            else:
+                _recorders[channel_name] = Recorder(channel_name, quality, platform)
+            _save_channels(_channels)
+
+        if was_recording and rec:
+            rec.stop()
+            old_thread = rec._thread
+            if old_thread and old_thread is not threading.current_thread():
+                old_thread.join(timeout=15)
+
+            if old_thread and old_thread.is_alive():
+                def finish_rollover(name, old_rec, serialization_lock):
+                    with serialization_lock:
+                        thread = old_rec._thread
+                        if thread and thread is not threading.current_thread():
+                            thread.join()
+                        with _lock:
+                            current = next((item for item in _channels if item.get("name") == name), None)
+                            if current is None or _recorders.get(name) is not old_rec:
+                                return
+                            final_quality = current.get("quality", quality)
+                            final_platform = _norm_platform(current.get("platform", platform))
+                            _recorders[name] = Recorder(name, final_quality, final_platform)
+                            if current.get("is_recording", False) and not current.get("sleeping", False):
+                                _force_check.add(name)
+                                _next_check_due[name] = 0.0
+                            _save_channels(_channels)
+                        _monitor_wake.set()
+                        _sse_broadcast("action")
+
+                threading.Thread(
+                    target=finish_rollover, args=(channel_name, rec, quality_lock),
+                    daemon=True, name=f"import-quality-rollover-{channel_name}",
+                ).start()
+                _sse_broadcast("action")
+                return True, True
+
+            with _lock:
+                current = next((item for item in _channels if item.get("name") == channel_name), None)
+                if current is not None and _recorders.get(channel_name) is rec:
+                    _recorders[channel_name] = Recorder(channel_name, quality, platform)
+                    if current.get("is_recording", False) and not current.get("sleeping", False):
+                        _force_check.add(channel_name)
+                        _next_check_due[channel_name] = 0.0
+                    _save_channels(_channels)
+        else:
+            with _lock:
+                current = next((item for item in _channels if item.get("name") == channel_name), None)
+                if current and current.get("is_recording", False) and not current.get("sleeping", False):
+                    _force_check.add(channel_name)
+                    _next_check_due[channel_name] = 0.0
+                _save_channels(_channels)
+
+    _monitor_wake.set()
+    _sse_broadcast("action")
+    return True, False
+
+
 @app.route("/api/import", methods=["POST"])
 def api_import():
     global _channels
     imported = 0
+    updated = 0
     skipped = 0
+    quality_updates: list[tuple[str, str, str]] = []
+    update_existing_quality = _as_bool(
+        request.form.get("update_existing_quality", request.args.get("update_existing_quality")), False
+    )
 
     try:
         file = request.files.get("file")
@@ -2573,12 +2715,13 @@ def api_import():
             for item in parsed:
                 if isinstance(item, str):
                     rooms.append({"name": item, "platform": DEFAULT_PLATFORM,
-                                  "quality": STREAM_QUALITY, "is_recording": True})
+                                  "quality": STREAM_QUALITY, "_quality_provided": False, "is_recording": True})
                 elif isinstance(item, dict) and "name" in item:
                     rooms.append({
                         "name": item["name"],
                         "platform": _norm_platform(item.get("platform")),
                         "quality": item.get("quality", STREAM_QUALITY),
+                        "_quality_provided": "quality" in item,
                         "is_recording": _as_bool(item.get("is_recording", True), True),
                         "sleeping": _as_bool(item.get("sleeping", False)),
                         "single_live_mode": _as_bool(item.get("single_live_mode", False)),
@@ -2599,6 +2742,7 @@ def api_import():
                         "name": name,
                         "platform": _norm_platform(row.get("platform")),
                         "quality": row.get("quality", STREAM_QUALITY),
+                        "_quality_provided": bool(row.get("quality", "").strip()),
                         "is_recording": _as_bool(row.get("is_recording", "true"), True),
                         "sleeping": _as_bool(row.get("sleeping", "false")),
                         "single_live_mode": _as_bool(row.get("single_live_mode", "false")),
@@ -2616,8 +2760,14 @@ def api_import():
             for room in rooms:
                 plat = _norm_platform(room.get("platform"))
                 name = _clean_name(plat, room["name"])
-                if not name or name in existing:
+                if not name:
                     skipped += 1
+                    continue
+                if name in existing:
+                    if update_existing_quality and room.get("_quality_provided") and room.get("quality") in QUALITY_OPTIONS:
+                        quality_updates.append((name, room["quality"], plat))
+                    else:
+                        skipped += 1
                     continue
                 entry = {"name": name, "quality": room["quality"],
                          "is_recording": False if room.get("sleeping", False) else room["is_recording"],
@@ -2642,12 +2792,24 @@ def api_import():
                 existing.add(name)
                 imported += 1
             _save_channels(_channels)
+
+        for name, selected_quality, plat in quality_updates:
+            try:
+                changed, pending = _apply_import_quality_update(name, selected_quality, plat)
+                if changed:
+                    updated += 1
+                else:
+                    skipped += 1
+            except Exception as exc:
+                skipped += 1
+                logger.exception("Importazione qualità per %s non riuscita: %s", name, exc)
+
         _monitor_wake.set()
 
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
 
-    return jsonify({"imported": imported, "skipped": skipped})
+    return jsonify({"imported": imported, "updated": updated, "skipped": skipped})
 
 
 @app.route("/api/check", methods=["POST"])

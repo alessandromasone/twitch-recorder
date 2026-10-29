@@ -25,7 +25,7 @@ Dashboard real-time con SSE, notifiche Telegram/Discord, qualità per canale con
 - **Diagnostica live** — mostra stato del monitor, richieste in corso, ultimo controllo, tentativi di riconnessione, errori, stato REC e modalità della preview
 - **Una volta** — pulsante con icona a orologio per avviare la registrazione temporanea; dopo la fine della live attende fino a 2 ore un eventuale ritorno online, azzera l'attesa se il canale riparte e mette automaticamente in pausa il canale se non torna live, disattivando il pulsante
 - **Dashboard live** — aggiornamenti in tempo reale via SSE (Server-Sent Events) senza refresh, con fallback a polling
-- **Qualità per canale** — qualità configurabile per canale (best, 1080p60, 720p, ecc.) con fallback automatico alla migliore disponibile
+- **Qualità per canale** — qualità configurabile per canale (best, 1080p60, 720p, ecc.); il fallback privilegia prima la stessa altezza video con FPS alternativi, poi la risoluzione inferiore più vicina e infine una superiore se non ci sono alternative. Se la qualità usata differisce dalla richiesta, la scheda lo segnala.
 - **Notifiche** — Telegram (con screenshot live dal CDN Twitch), Discord webhook e webhook HTTP generico per eventi online, offline, inizio e fine registrazione
 - **Smart retry** — quando lo stream cade, tenta la riconnessione con tentativi e attesa configurabili prima di arrendersi
 - **Split automatico** — divide i file al raggiungimento della dimensione massima e riavvia la registrazione senza interruzioni
@@ -183,6 +183,8 @@ Tutti gli endpoint restituiscono JSON.
 | `/api/check` | POST | Forza un check immediato (`{"channel":"nome"}` o `{}` per tutti) |
 | `/api/export` | GET | Esporta canali in JSON (default) o CSV (`?format=csv`) |
 | `/api/import` | POST | Importa canali da file JSON o CSV (multipart o body) |
+
+Nel modale di importazione è disponibile **Aggiorna la qualità dei canali già presenti**. Se selezionato, aggiorna solo `quality` dei canali duplicati; se una REC è attiva, finalizza il file corrente e avvia la nuova qualità in un file distinto. Senza la casella selezionata, i duplicati sono saltati come prima. Le liste testuali senza un campo qualità non modificano le qualità esistenti.
 
 | `/api/delete_recording` | POST | Elimina una registrazione (`{"filename":"..."}`) |
 | `/live/<platform>/<room>` | GET | Flusso live diretto temporaneo per il player; non crea file e viene chiuso quando il player termina |

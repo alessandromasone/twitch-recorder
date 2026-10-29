@@ -1,3 +1,12 @@
+Versione aggiornata — selezione qualità coerente e import configurazione esistente
+
+- Corretto il fallback qualità: cerca prima una variante alla stessa altezza video (FPS alternativi) prima di scendere di risoluzione; se non esistono varianti inferiori, considera quella superiore più vicina.
+- Aggiunto `resolved_quality` nello stato runtime e indicatore in scheda quando Streamlink usa una qualità diversa da quella richiesta.
+- Migliorati i log: riportano la qualità richiesta, la qualità selezionata e le varianti disponibili.
+- Aggiunta all'importazione l'opzione esplicita per aggiornare la qualità dei canali già presenti, senza sovrascrivere pausa, sonno o modalità Una volta. Le REC attive vengono finalizzate e riavviate in file separato se la qualità cambia.
+- Senza l'opzione, il comportamento precedente di saltare i duplicati resta invariato; importazioni di liste testuali prive del campo `quality` non modificano la qualità esistente.
+- Test isolati sulla selezione tra 720p/720p60 e 1080p/1080p60; sintassi Python/JavaScript verificata. Test con dirette reali non eseguito in questo ambiente.
+
 Versione aggiornata — preview più resiliente durante gli annunci
 
 - Aumentati i timeout della preview temporanea e condivisa: 120 secondi per ricevere i primi dati e 180 secondi di tolleranza per pause di output durante la live, configurabili tramite `.env`.

@@ -122,6 +122,10 @@
     .ch-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .ch-quality-row { display: flex; align-items: center; gap: 6px; }
     .ch-quality-label { font-size: .7rem; color: var(--text3); }
+    .ch-quality-effective { font-size: .65rem; color: #fbbf24; font-weight: 600; white-space: nowrap; }
+    .import-update-option { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; color: var(--text2); font-size: .8rem; line-height: 1.4; }
+    .import-update-option input { margin-top: 3px; accent-color: var(--tw); }
+    .import-help { color: var(--text3); font-size: .72rem; margin: 6px 0 0; line-height: 1.45; }
     .ch-actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
     .ch-btn { background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; color: var(--text2); cursor: pointer; font-size: .78rem; transition: all .15s; display: inline-flex; align-items: center; gap: 3px; }
     .ch-btn:hover { border-color: var(--text2); color: var(--text1); background: var(--surface3); }
@@ -255,6 +259,11 @@
         <i class="bi bi-file-earmark-arrow-up"></i> Scegli file
         <input type="file" id="importFile" accept=".json,.csv,.txt">
       </label>
+      <label class="import-update-option">
+        <input type="checkbox" id="importUpdateExistingQuality">
+        <span><strong>Aggiorna la qualità dei canali già presenti</strong><br>Quando la qualità cambia, una REC attiva viene finalizzata e riparte in un nuovo file.</span>
+      </label>
+      <p class="import-help">Se non selezioni questa opzione, i canali con lo stesso nome vengono saltati come prima. Per i canali esistenti viene modificata solo la qualità; pausa, sonno e modalità Una volta non cambiano.</p>
       <div class="import-result" id="importResult"></div>
     </div>
     <div class="confirm-btns" style="margin-top:16px">
@@ -569,7 +578,7 @@
         </div>
       </div>
       <div class="ch-bottom">
-        <div class="ch-quality-row"><span class="ch-quality-label">Qualità:</span><select class="ch-quality-select" data-action="quality" aria-label="Qualità registrazione"></select></div>
+        <div class="ch-quality-row"><span class="ch-quality-label">Qualità:</span><select class="ch-quality-select" data-action="quality" aria-label="Qualità registrazione"></select><span class="ch-quality-effective" data-part="quality-effective" hidden></span></div>
         <div class="ch-actions">
           <button type="button" class="ch-btn btn-play" data-action="live" title="Guarda la live"><i class="bi bi-broadcast"></i> Guarda live</button>
           <button type="button" class="ch-btn btn-single-live" data-action="single-live" title="Attiva Una volta"><i class="bi bi-clock"></i> Una volta</button>
@@ -649,7 +658,16 @@
       q.replaceChildren(...qualityOpts.map(value => { const o=document.createElement('option'); o.value=value; o.textContent=value; return o; }));
       q.value = selected;
     } else if (document.activeElement !== q && q.value !== ch.quality) q.value = ch.quality;
-    q.title = `Qualità corrente: ${ch.quality || 'best'}. Cambiare qualità durante REC apre un nuovo file.`;
+    const effectiveQuality = card.querySelector('[data-part="quality-effective"]');
+    const qualityFallback = !!(ch.actually_recording && ch.resolved_quality &&
+      ch.resolved_quality !== ch.quality && !['best','worst','audio_only'].includes(ch.resolved_quality));
+    effectiveQuality.hidden = !qualityFallback;
+    effectiveQuality.textContent = qualityFallback ? `selezionata ${ch.resolved_quality}` : '';
+    effectiveQuality.title = qualityFallback
+      ? `Qualità richiesta: ${ch.quality}. Streamlink seleziona ${ch.resolved_quality} perché la variante richiesta non è disponibile.` : '';
+    q.title = qualityFallback
+      ? `Qualità richiesta: ${ch.quality}; selezionata da Streamlink: ${ch.resolved_quality}. Cambiare qualità durante REC apre un nuovo file.`
+      : `Qualità richiesta: ${ch.quality || 'best'}. Cambiare qualità durante REC apre un nuovo file.`;
 
     const liveBtn = card.querySelector('[data-action="live"]');
     liveBtn.title = ch.online ? 'Guarda la live; durante REC usa il flusso condiviso' : 'Prova ad aprire il flusso live';
@@ -1070,9 +1088,10 @@
   document.getElementById("importFile").addEventListener("change",async function(){
     const file=this.files[0]; if(!file)return;
     const res=document.getElementById("importResult");
-    try{const fd=new FormData();fd.append("file",file);const csrf=document.querySelector('meta[name="csrf-token"]')?.content||'';const r=await fetch("/api/import",{method:"POST",headers:{"X-CSRF-Token":csrf},body:fd});if(r.status===401){goToLogin();return;}const d=await r.json();if(r.ok){res.className="import-result ok";res.textContent=`Importati ${d.imported} canali, ${d.skipped} saltati.`;setTimeout(()=>closeConfirm("importModal"),2000);}else{res.className="import-result err";res.textContent=d.error||"Errore";}}
+    try{const fd=new FormData();fd.append("file",file);fd.append("update_existing_quality",document.getElementById("importUpdateExistingQuality")?.checked?"true":"false");const csrf=document.querySelector('meta[name="csrf-token"]')?.content||'';const r=await fetch("/api/import",{method:"POST",headers:{"X-CSRF-Token":csrf},body:fd});if(r.status===401){goToLogin();return;}const d=await r.json();if(r.ok){res.className="import-result ok";res.textContent=`Importati ${d.imported} nuovi, ${d.updated||0} qualità aggiornate, ${d.skipped} saltati.`;setTimeout(()=>closeConfirm("importModal"),3500);}else{res.className="import-result err";res.textContent=d.error||"Errore";}}
     catch(e){res.className="import-result err";res.textContent="Errore: "+e.message;}
     this.value="";
+    const updateQualityCheckbox=document.getElementById("importUpdateExistingQuality");if(updateQualityCheckbox)updateQualityCheckbox.checked=false;
   });
 
   document.addEventListener("keydown",e=>{if(e.key==="Escape"){closeConfirm("confirmRemove");closeConfirm("confirmDelete");closeConfirm("importModal");}});
