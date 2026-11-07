@@ -48,6 +48,7 @@ def meta_from_helix(stream: dict) -> dict:
         "display_name": stream.get("user_name"),
         "tags": stream.get("tags") or [],
         "language": stream.get("language"),
+        "thumbnail_url": stream.get("thumbnail_url"),
         "source": "helix",
     }
 

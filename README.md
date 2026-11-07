@@ -7,13 +7,13 @@ Applicazione web self-hosted che registra automaticamente le dirette di Twitch, 
 - **Registrazione automatica** con conferma della fine live su più controlli, riconnessione intelligente, split a dimensione massima e qualità per canale con fallback automatico (stessa risoluzione con FPS diversi, poi la più vicina inferiore, poi la superiore).
 - **Controlli leggeri.** Con le credenziali Twitch, tutti i canali Twitch si controllano con l'API Helix: una sola richiesta HTTP ogni 100 canali, invece di un processo Streamlink per canale. Kick e YouTube usano Streamlink.
 - **Rilevamento delle rerun, anche non dichiarate.** Ogni live riceve un punteggio da 0 a 100 basato su tag e titolo, titoli già trasmessi, VOD, spettatori e orario, con una politica per canale: registra e segna, salta, ignora. Vedi [Rerun](#rerun).
-- **Multiview "In onda".** I canali in diretta compaiono come monitor con miniatura, bordo *tally* (rosso in REC, verde in onda, ambra se è una rerun sospetta), titolo, categoria e spettatori. Gli altri canali sono righe compatte.
+- **Multiview "In onda".** I canali in diretta compaiono come schede con la copertina di Twitch, etichetta REC/LIVE, titolo, categoria e spettatori. Gli altri canali sono righe compatte.
 - **Preview condivisa.** Una sola sorgente per canale, qualunque sia il numero di finestre aperte. Durante la REC la preview usa il flusso già scaricato; senza REC apre un flusso temporaneo che si chiude quando l'ultima finestra viene chiusa. Non crea mai file.
-- **Miniature senza costi.** Durante la REC il fotogramma viene preso dal flusso già in memoria; per Twitch fuori REC dal CDN pubblico; per i file conclusi viene generato una sola volta.
+- **Copertine senza costi.** Per Twitch l'immagine ufficiale restituita dall'API (o dal CDN pubblico); per Kick e YouTube in REC e per il file in corso nella lista registrazioni, un fotogramma dal flusso già in memoria; per i file conclusi una miniatura generata una sola volta.
 - **Registrazioni con contesto:** raggruppate per giorno, con miniatura, durata, titolo e categoria della live e segnalazione rerun.
 - **Comandi sempre a portata:** su ogni scheda e riga ci sono REC/pausa, *Una volta*, *A dormire*, controllo immediato e, per le rerun sospette, «È rerun» / «Non lo è».
-- **Anteprima al passaggio del mouse** sulle miniature delle live (muta, disattivabile con `HOVER_PREVIEW=false`).
-- **Versione minimal** con `MINIMAL_UI=true` o per singolo browser: solo testo, nessuna immagine.
+- **Versione minimal** con `MINIMAL_UI=true` o per singolo browser: un'unica lista densa con le dirette in cima, solo testo.
+- **Player pulito:** controlli propri (play, volume ricordato, avanzamento per i file, "In diretta" per tornare al punto live, picture-in-picture, schermo intero, scorciatoie `spazio` `m` `f` `←` `→`) e riconnessione automatica se il flusso resta fermo per 15 secondi.
 - **Gestione:** pannello di dettaglio per ogni canale, selezione multipla (pausa, registra, dormi, qualità, politica rerun, rimozione), ricerca anche per titolo e gioco, filtri con contatori, modalità *Una volta*, modalità *A dormire* e import/export in JSON e CSV.
 - **Aggiornamenti in tempo reale** via SSE incrementale: dopo il primo stato completo arrivano solo i canali cambiati. Senza client collegati non viene calcolato nulla.
 - **Login opzionale** con CSRF, limite ai tentativi e sessione persistente.
@@ -179,8 +179,7 @@ Helix aggiorna lo stato delle live con qualche decina di secondi di ritardo risp
 
 | Variabile | Default | Descrizione |
 |---|---|---|
-| `MINIMAL_UI` | `false` | Versione minimal predefinita: niente miniature, anteprime, avatar e animazioni. Ogni browser può cambiarla da Impostazioni → Aspetto |
-| `HOVER_PREVIEW` | `true` | Anteprima video muta dopo mezzo secondo col puntatore su una live. Durante la REC usa il flusso già scaricato; fuori REC apre la sorgente temporanea condivisa, chiusa 10 s dopo che il puntatore esce |
+| `MINIMAL_UI` | `false` | Versione minimal predefinita: un'unica lista densa di solo testo, senza copertine, avatar e animazioni. Ogni browser può cambiarla da Impostazioni → Aspetto |
 
 I segmenti più piccoli di 4 KB, per esempio quando una live non parte, vengono eliminati automaticamente.
 

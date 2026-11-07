@@ -1,3 +1,14 @@
+Versione preview 3 — copertine Twitch, player nuovo, minimal denso
+
+- Copertine dei canali Twitch dall'immagine ufficiale (thumbnail_url di Helix o CDN), anche durante la REC; il fotogramma del flusso registrato resta per il file in corso nella lista registrazioni e per Kick/YouTube.
+- Rimossa l'anteprima video al passaggio del mouse (e HOVER_PREVIEW).
+- Player rifatto: controlli propri, volume e muto ricordati, avanzamento per i file, «In diretta» per tornare al punto live, picture-in-picture, schermo intero, scorciatoie; watchdog che riconnette dopo 15 s senza avanzamento e salta in avanti se resta troppo indietro.
+- Causa dei blocchi della preview: il buffer condiviso poteva consegnare pacchetti MPEG-TS spezzati a chi si collegava a metà o saltava in avanti. Ora i chunk sono sempre allineati a 188 byte.
+- Stato REC in un pulsante compatto (registra / in attesa / in pausa / dorme) al posto dell'etichetta grande; niente più bordo colorato sulle schede.
+- Minimal: un'unica lista densa con le dirette in cima (REC e durata, titolo, categoria, spettatori), registrazioni su due righe.
+- Ripristinati la favicon originale e il titolo fisso della scheda.
+- Login ridisegnato: un solo campo con invio integrato, mostra password, avviso maiuscole, tentativi rimanenti.
+
 Versione preview 2 — comandi rapidi, anteprima al passaggio, minimal, liste stabili
 
 - Comandi sempre visibili su schede e righe: stato REC (REC attiva / In attesa / In pausa / Dorme) con un clic, Una volta, A dormire, Controlla ora, Dettagli; sulle rerun sospette i pulsanti «È rerun» e «Non lo è».

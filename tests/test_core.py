@@ -59,23 +59,38 @@ def test_normalize_title_ignores_commands_and_dates():
 
 # ── Buffer condiviso ──
 
+def _ts(n_packets: int, marker: int) -> bytes:
+    return (b"\x47" + bytes([marker]) * 187) * n_packets
+
+
 def test_hub_slow_reader_skips_ahead():
     hub = LiveStreamHub(max_bytes=512 * 1024)
     reader = hub.iter_chunks(from_start=True, timeout=0.05)
     for i in range(40):
-        hub.publish(bytes([i]) * 64 * 1024)
+        hub.publish(_ts(350, i))
     first = next(reader)
-    assert first[0] >= 32   # i chunk più vecchi sono stati scartati, il lettore salta in avanti
+    assert first[1] >= 30   # i chunk più vecchi sono stati scartati, il lettore salta in avanti
     hub.close()
-    assert all(chunk for chunk in reader) or True
+
+
+def test_hub_chunks_are_packet_aligned():
+    hub = LiveStreamHub(max_bytes=1024 * 1024)
+    stream = b"xx" + _ts(100, 1)               # spazzatura iniziale e letture non allineate
+    for i in range(0, len(stream), 1000):
+        hub.publish(stream[i:i + 1000])
+    reader = hub.iter_chunks(from_start=True, timeout=0.05)
+    hub.close()
+    chunks = [c for c in reader if c]
+    assert all(len(c) % 188 == 0 and c[0] == 0x47 for c in chunks)
+    assert sum(map(len, chunks)) == 188 * 100
 
 
 def test_hub_tail_bytes():
     hub = LiveStreamHub(max_bytes=1024 * 1024)
     for i in range(5):
-        hub.publish(bytes([i]) * 1000)
-    assert hub.tail_bytes(1500)[-1] == 4
-    assert len(hub.tail_bytes(1500)) == 2000
+        hub.publish(_ts(6, i))
+    tail = hub.tail_bytes(1500)
+    assert tail[1] in (3, 4) and len(tail) % 188 == 0
 
 
 # ── Rerun ──

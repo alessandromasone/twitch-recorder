@@ -66,11 +66,9 @@ DEDUP_FILE = os.getenv("DEDUP_FILE", "").strip() or os.path.join(DATA_DIR, "dedu
 HISTORY_FILE = os.getenv("HISTORY_FILE", "").strip() or os.path.join(DATA_DIR, "channel_history.json")
 RECORDINGS_META_FILE = os.path.join(RECORDINGS_DIR, ".recordings_meta.json")
 THUMBS_DIR = os.path.join(RECORDINGS_DIR, ".thumbs")
-# Interfaccia minimal: niente miniature, anteprime al passaggio del mouse, avatar e animazioni.
+# Interfaccia minimal: lista densa di solo testo, senza copertine, avatar e animazioni.
 # Ogni browser può comunque cambiarla dalle impostazioni del pannello.
 MINIMAL_UI = _env_bool("MINIMAL_UI")
-# Anteprima video muta quando il puntatore resta sulla miniatura di una live.
-HOVER_PREVIEW = _env_bool("HOVER_PREVIEW", "true")
 RECORDING_THUMBS = _env_bool("RECORDING_THUMBS", "false" if MINIMAL_UI else "true") \
     if os.getenv("RECORDING_THUMBS", "").strip() else not MINIMAL_UI
 

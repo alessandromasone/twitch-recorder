@@ -13,7 +13,7 @@ import time
 from . import preview, rerun, state, storage
 from .config import (
     AUTO_CONVERT, DEDUP_ENABLED, DELETE_AFTER_CONVERT, ERROR_CHECK_INTERVAL, HELIX_AVAILABLE,
-    HELIX_ENABLED, HOVER_PREVIEW, MINIMAL_UI, MONITOR_WORKERS, NOTIFY_TYPE, OFFLINE_CHECK_INTERVAL, OFFLINE_CONFIRM_INTERVAL,
+    HELIX_ENABLED, MINIMAL_UI, MONITOR_WORKERS, NOTIFY_TYPE, OFFLINE_CHECK_INTERVAL, OFFLINE_CONFIRM_INTERVAL,
     OFFLINE_CONFIRMATIONS, ONLINE_CHECK_INTERVAL, PLATFORMS, QUALITY_OPTIONS, RECONNECT_TRIES,
     RECONNECT_WAIT, RECORDER_OFFLINE_GRACE_SECONDS, RERUN_DEFAULT_POLICY, RERUN_PROBABLE_SCORE,
     RERUN_SUSPECT_SCORE, SINGLE_LIVE_GRACE_SECONDS, SKIP_RERUNS, SKIP_TWITCH_ADS, STREAM_QUALITY,
@@ -23,12 +23,13 @@ from .util import fmt_duration, human_size, norm_platform, platform_url
 VOLATILE = {"uptime", "uptime_human", "last_checked", "single_live_offline_remaining"}
 
 
-def _thumb_url(name: str, platform: str, live: bool, recording: bool) -> str | None:
-    # Durante la REC il fotogramma arriva dal flusso già scaricato: nessuna richiesta esterna.
+def _thumb_url(name: str, platform: str, live: bool, recording: bool, meta: dict) -> str | None:
+    """Copertina: per Twitch l'immagine ufficiale (API Helix o CDN), per le altre il flusso in REC."""
+    if platform == "twitch" and live:
+        template = meta.get("thumbnail_url") or f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{name}-{{width}}x{{height}}.jpg"
+        return template.replace("{width}", "440").replace("{height}", "248")
     if recording:
         return f"/thumb/live/{name}.jpg"
-    if platform == "twitch" and live:
-        return f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{name}-440x248.jpg"
     return None
 
 
@@ -98,7 +99,9 @@ def _channel_dict(ch: dict, now: float) -> dict:
         "game": meta.get("game") if live_now else None,
         "viewers": meta.get("viewers") if live_now else None,
         "stream_started_at": meta.get("started_at") if live_now else None,
-        "thumb_url": _thumb_url(name, plat, live_now, rec_is_recording),
+        "thumb_url": _thumb_url(name, plat, live_now, rec_is_recording, meta),
+        # Fotogramma dal flusso in registrazione: usato per il file in corso nella lista registrazioni.
+        "frame_url": f"/thumb/live/{name}.jpg" if rec_is_recording else None,
         "rerun": ({"level": assessment.get("level"), "score": assessment.get("score"),
                    "reasons": [r for r in assessment.get("reasons", []) if r.get("points")],
                    "override": assessment.get("override")}
@@ -125,7 +128,7 @@ def _config() -> dict:
         "helix_available": HELIX_AVAILABLE, "helix_checks": HELIX_ENABLED,
         "rerun_default_policy": RERUN_DEFAULT_POLICY, "rerun_suspect_score": RERUN_SUSPECT_SCORE,
         "rerun_probable_score": RERUN_PROBABLE_SCORE, "default_quality": STREAM_QUALITY,
-        "minimal_ui": MINIMAL_UI, "hover_preview": HOVER_PREVIEW,
+        "minimal_ui": MINIMAL_UI,
     }
 
 

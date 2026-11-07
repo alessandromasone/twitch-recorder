@@ -222,14 +222,6 @@
     $("#sRerunWrap").hidden = !st.suspected_reruns;
     const recCount = st.active_recordings || 0;
     document.body.classList.toggle("has-rec", recCount > 0);
-    if (renderHeader.lastRec !== recCount) {
-      renderHeader.lastRec = recCount;
-      document.title = recCount ? `● ${recCount} in REC · Twitch Recorder` : "Twitch Recorder";
-      const dot = recCount ? "#ef4444" : "#6b7286";
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#20242e"/><rect x="9" y="15" width="46" height="31" rx="5" fill="none" stroke="#8b5cf6" stroke-width="4"/><path d="M26 53h12" stroke="#8b5cf6" stroke-width="4" stroke-linecap="round"/><circle cx="32" cy="30.5" r="8" fill="${dot}"/></svg>`;
-      const link = document.querySelector('link[rel="icon"]');
-      if (link) link.href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
-    }
     const health = $("#health");
     const ms = st.monitor_state || "ok";
     health.className = `health ${ms === "ok" ? "ok" : ms === "stopped" ? "bad" : ""}`;
@@ -271,6 +263,11 @@
     const bucket = Math.floor(Date.now() / (ch.thumb_url.startsWith("/") ? 90000 : 120000));
     return `${ch.thumb_url}${ch.thumb_url.includes("?") ? "&" : "?"}t=${bucket}`;
   }
+  // Fotogramma dal flusso in registrazione (per il file in corso nella lista registrazioni).
+  function frameSrc(ch) {
+    if (!ch.frame_url || isMinimal()) return "";
+    return `${ch.frame_url}?t=${Math.floor(Date.now() / 90000)}`;
+  }
   function avatarHtml(ch) {
     return ch.avatar && !isMinimal() ? `<img src="${esc(ch.avatar)}" alt="" loading="lazy">` : esc((ch.display_name || ch.name).slice(0, 1).toUpperCase());
   }
@@ -283,13 +280,12 @@
     const sig = [ch.is_recording, ch.actually_recording, ch.sleeping, ch.single_live_mode, compact].join("|");
     if (box._sig === sig) return;
     box._sig = sig;
-    const rec = ch.sleeping
-      ? `<button class="tool tool-sleep" type="button" data-act="sleep" title="Dorme: nessun controllo e nessuna REC. Clic per risvegliarlo">${icon("moon")}<span>Dorme</span></button>`
-      : ch.actually_recording
-        ? `<button class="tool tool-rec on" type="button" data-act="rec-toggle" title="Sta registrando. Clic per fermare e mettere in pausa">${icon("rec")}<span>REC attiva</span></button>`
-        : ch.is_recording
-          ? `<button class="tool tool-armed" type="button" data-act="rec-toggle" title="Registrerà appena il canale va in onda. Clic per mettere in pausa">${icon("rec")}<span>In attesa</span></button>`
-          : `<button class="tool tool-paused" type="button" data-act="rec-toggle" title="In pausa: il canale è controllato ma non registrato. Clic per registrare">${icon("pause")}<span>In pausa</span></button>`;
+    // Un solo pulsante compatto che mostra lo stato e lo cambia al clic.
+    const state = ch.sleeping ? ["st-sleep", "moon", "Dorme: nessun controllo e nessuna REC. Clic per risvegliarlo", "sleep"]
+      : ch.actually_recording ? ["st-rec", "rec", "Sta registrando. Clic per fermare e mettere in pausa", "rec-toggle"]
+        : ch.is_recording ? ["st-armed", "rec", "In attesa: registrerà appena va in onda. Clic per mettere in pausa", "rec-toggle"]
+          : ["st-paused", "pause", "In pausa: controllato ma non registrato. Clic per registrare", "rec-toggle"];
+    const rec = `<button class="icon-btn st ${state[0]}" type="button" data-act="${state[3]}" title="${state[2]}" aria-label="${state[2]}">${icon(state[1])}</button>`;
     box.innerHTML = `${rec}
       <button class="icon-btn ${ch.single_live_mode ? "is-once on" : ""}" type="button" data-act="once" aria-pressed="${!!ch.single_live_mode}" title="${ch.single_live_mode ? "Una volta attiva: dopo questa live il canale va in pausa. Clic per disattivare" : "Registra solo la prossima live (o quella in corso), poi pausa"}" aria-label="Una volta" ${ch.sleeping ? "disabled" : ""}>${icon("clock")}</button>
       ${ch.sleeping ? "" : `<button class="icon-btn" type="button" data-act="sleep" title="Metti a dormire: niente controlli e niente REC" aria-label="Metti a dormire">${icon("moon")}</button>`}
@@ -401,7 +397,19 @@
     const a = el.querySelector(".row-name a");
     a.href = ch.home_url; setText(a, ch.display_name || ch.name);
     setHtml(el.querySelector(".plat-slot"), platTag(ch));
-    setHtml(el.querySelector(".row-status"), st.html);
+    if (isOnAir(ch)) {
+      const level = rerunLevel(ch) || (ch.last_check_result === "rerun" ? "confirmed" : null);
+      const tag = ch.actually_recording
+        ? `<span class="live-tag rec">REC <span data-since="${ch.rec_started_at || ""}">${duration(serverNow() - (ch.rec_started_at || serverNow()))}</span></span>`
+        : `<span class="live-tag">${ch.last_check_result === "rerun" ? "RERUN" : "LIVE"}</span>`;
+      const parts = [ch.title ? `<span class="live-title" title="${esc(ch.title)}">${esc(ch.title)}</span>` : "",
+        ch.game ? `<span class="live-game">${esc(ch.game)}</span>` : "", ch.viewers != null ? `<span>${compact(ch.viewers)}</span>` : "",
+        level ? `<span class="warn">${level === "confirmed" ? "rerun" : "rerun?"}</span>` : ""].join("");
+      setHtml(el.querySelector(".row-status"), `${tag}${parts}`);
+      el.querySelector(".dot").className = `dot ${ch.actually_recording ? "error" : "online"}`;
+    } else setHtml(el.querySelector(".row-status"), st.html);
+    el.classList.toggle("is-live", isOnAir(ch));
+    el.querySelector(".row-status").classList.toggle("live", isOnAir(ch));
     setText(el.querySelector(".row-quality"), ch.quality);
     quickTools(el, ch, { compact: true });
   }
@@ -428,8 +436,13 @@
     const term = ($("#search").value || "").trim().toLocaleLowerCase();
     const visible = S.order.map((n) => S.channels.get(n)).filter(Boolean)
       .filter((c) => matchesFilter(c) && matchesSearch(c, term));
-    const onAir = visible.filter(isOnAir).sort(sorterFor("wall"));
-    const others = visible.filter((c) => !isOnAir(c)).sort(sorterFor("list"));
+    let onAir = visible.filter(isOnAir).sort(sorterFor("wall"));
+    let others = visible.filter((c) => !isOnAir(c)).sort(sorterFor("list"));
+    if (isMinimal()) {
+      // Minimal: un'unica lista densa, con le dirette in cima.
+      others = [...onAir, ...others];
+      onAir = [];
+    }
     syncContainer($("#wall"), tiles, onAir, makeTile, updateTile);
     syncContainer($("#rows"), rows, others, makeRow, updateRow);
     $("#wallSection").hidden = !onAir.length;
@@ -458,7 +471,7 @@
   const dayNodes = new Map();
   function recThumbHtml(r, ch) {
     if (isMinimal()) return "";
-    if (r.in_use) return ch?.thumb_url ? `<img src="${esc(thumbSrc(ch))}" alt="" decoding="async">` : "";
+    if (r.in_use) return ch?.frame_url ? `<img src="${esc(frameSrc(ch))}" alt="" decoding="async" onerror="this.style.visibility='hidden'" onload="this.style.visibility=''">` : "";
     return `<img src="/thumb/rec/${encodeURIComponent(r.name)}.jpg" alt="" loading="lazy" decoding="async" onerror="this.remove()">`;
   }
   function updateRecNode(el, r) {
@@ -485,7 +498,7 @@
     } else if (r.in_use && !isMinimal()) {
       // Aggiorna solo la miniatura live quando cambia il suo intervallo di aggiornamento.
       const img = el.querySelector(".rec-thumb img");
-      const src = ch ? thumbSrc(ch) : "";
+      const src = ch ? frameSrc(ch) : "";
       if (img && src && img.getAttribute("src") !== src) img.src = src;
     }
     setText(el.querySelector("[data-size]"), humanSize(S.activeSizes[r.name] ?? r.size));
@@ -530,50 +543,6 @@
       if (el) setText(el, humanSize(size));
     }
   }
-
-  // ── Anteprima al passaggio del mouse ──
-  let hover = {};
-  const canHover = () => !isMinimal() && S.config.hover_preview !== false && !S.selecting
-    && matchMedia("(hover: hover) and (pointer: fine)").matches && !$("#player").classList.contains("open");
-  function stopHover() {
-    clearTimeout(hover.timer);
-    if (hover.player) { try { hover.player.destroy(); } catch { /* già chiuso */ } }
-    hover.video?.remove();
-    hover.screen?.classList.remove("previewing", "preview-on");
-    hover = {};
-  }
-  function startHover(screen) {
-    stopHover();
-    if (!canHover()) return;
-    hover.screen = screen;
-    hover.timer = setTimeout(async () => {
-      const ch = S.channels.get(screen.closest(".mon")?.dataset.name);
-      if (!ch || hover.screen !== screen) return;
-      try { await loadMpegts(); } catch { return; }
-      if (hover.screen !== screen || !mpegts.isSupported()) return;
-      screen.classList.add("previewing");
-      const v = document.createElement("video");
-      v.muted = true; v.playsInline = true; v.className = "mon-video";
-      v.addEventListener("playing", () => screen.classList.add("preview-on"));
-      screen.appendChild(v);
-      const p = mpegts.createPlayer({ type: "mpegts", isLive: true, url: `/live/${encodeURIComponent(ch.platform)}/${encodeURIComponent(ch.name)}` },
-        { enableStashBuffer: false, lazyLoad: false, liveBufferLatencyChasing: true, fixAudioTimestampGap: true, autoCleanupSourceBuffer: true });
-      p.attachMediaElement(v);
-      p.on(mpegts.Events.ERROR, () => { if (hover.player === p) stopHover(); });
-      p.load();
-      v.play().catch(() => {});
-      hover.player = p; hover.video = v;
-    }, 650);
-  }
-  $("#wall").addEventListener("pointerover", (e) => {
-    const screen = e.target.closest(".mon-screen");
-    if (screen && screen !== hover.screen) startHover(screen);
-  });
-  $("#wall").addEventListener("pointerout", (e) => {
-    const screen = e.target.closest(".mon-screen");
-    if (screen && !(e.relatedTarget && screen.contains(e.relatedTarget)) && screen === hover.screen) stopHover();
-  });
-  document.addEventListener("visibilitychange", () => { if (document.hidden) stopHover(); });
 
   // ── Pannello dettagli canale ──
   function openDrawer(spec) {
@@ -713,7 +682,7 @@
           <label for="uiMode">Interfaccia</label>
           <select id="uiMode">
             <option value="auto" ${S.uiMode === "auto" ? "selected" : ""}>Predefinita del server (${S.config.minimal_ui ? "minimal" : "completa"})</option>
-            <option value="full" ${S.uiMode === "full" ? "selected" : ""}>Completa: miniature, anteprime e avatar</option>
+            <option value="full" ${S.uiMode === "full" ? "selected" : ""}>Completa: copertine e avatar</option>
             <option value="minimal" ${S.uiMode === "minimal" ? "selected" : ""}>Minimal: solo testo, nessuna immagine</option>
           </select>
           <small>Vale solo per questo browser. La predefinita si imposta con MINIMAL_UI nel file .env.</small>
@@ -726,7 +695,7 @@
   }
 
   // ── Player ──
-  let mts = null, playback = null, mpegtsLoading = null;
+  let mpegtsLoading = null;
   function loadMpegts() {
     if (window.mpegts) return Promise.resolve();
     if (!mpegtsLoading) {
@@ -739,108 +708,256 @@
     }
     return mpegtsLoading;
   }
-  function playerStatus(text, isError = false) {
-    $("#playerStatus").hidden = !text;
-    $("#playerStatus").classList.toggle("error", isError);
+  const clock = (sec) => {
+    if (!Number.isFinite(sec) || sec < 0) return "0:00";
+    sec = Math.floor(sec);
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), x = String(sec % 60).padStart(2, "0");
+    return h ? `${h}:${String(m).padStart(2, "0")}:${x}` : `${m}:${x}`;
+  };
+
+  const P = {
+    mts: null, src: null, timers: {}, tries: 0, lastTime: -1, lastMove: 0, idleSince: 0,
+    el: () => $("#player"), v: () => $("#video"),
+  };
+  const MAX_TRIES = 6;
+
+  function pStatus(text, { error = false, retry = false } = {}) {
+    const box = $("#playerStatus");
+    box.hidden = !text;
+    box.classList.toggle("error", error);
     $("#playerStatusText").textContent = text || "";
+    $("#playerRetry").hidden = !retry;
   }
-  function destroyPlayer() {
-    const v = $("#video");
-    v.onplaying = v.onerror = v.onended = v.onwaiting = v.ontimeupdate = v.onloadedmetadata = null;
-    if (mts) { const p = mts; mts = null; try { p.destroy(); } catch { /* già chiuso */ } }
+  function pClearTimers() { Object.values(P.timers).forEach((t) => { clearTimeout(t); clearInterval(t); }); P.timers = {}; }
+  function pDetach() {
+    const v = P.v();
+    if (P.mts) { const m = P.mts; P.mts = null; try { m.pause(); m.unload(); m.detachMediaElement(); m.destroy(); } catch { /* già chiuso */ } }
+    v.onplaying = v.onwaiting = v.onerror = v.onended = v.ontimeupdate = v.onloadedmetadata = v.onvolumechange = v.onpause = v.onplay = null;
     try { v.pause(); v.removeAttribute("src"); v.load(); } catch { /* nessun media */ }
   }
-  function endPlayback() {
-    if (playback) { playback.closed = true; ["retry", "stall", "stable"].forEach((k) => clearTimeout(playback[k])); }
-    playback = null;
-  }
-  function scheduleReconnect(st, reason) {
-    if (!st || playback !== st || st.closed || st.pending) return;
-    clearTimeout(st.stall); clearTimeout(st.stable);
-    if (st.tries >= 7) { destroyPlayer(); playerStatus("La diretta si è interrotta. Chiudi e riapri il player per riprovare.", true); return; }
-    st.tries++; st.pending = true;
-    const delay = Math.min(15000, 1500 * 2 ** (st.tries - 1));
-    playerStatus(`Flusso interrotto (${reason}). Nuovo tentativo ${st.tries}/7 tra ${Math.ceil(delay / 1000)} s…`);
-    st.retry = setTimeout(() => { if (playback === st && !st.closed) { st.pending = false; attachLive(st); } }, delay);
-  }
-  function attachLive(st) {
-    destroyPlayer();
-    const v = $("#video");
-    st.lastProgress = Date.now(); st.played = false;
-    const progress = () => { st.lastProgress = Date.now(); clearTimeout(st.stall); st.stall = null; };
+
+  function pAttach() {
+    const src = P.src;
+    if (!src) return;
+    pDetach();
+    const v = P.v();
+    v.muted = store.get("tr-muted", "0") === "1";
+    v.volume = Math.min(1, Math.max(0, Number(store.get("tr-volume", "0.8")) || 0.8));
     v.onplaying = () => {
-      progress();
-      if (st.pending) { clearTimeout(st.retry); st.pending = false; st.tries = 0; }
-      st.played = true; playerStatus("");
-      if (st.tries && !st.stable) st.stable = setTimeout(() => { st.tries = 0; st.stable = null; }, 120000);
+      pStatus("");
+      clearTimeout(P.timers.stable);
+      P.timers.stable = setTimeout(() => { P.tries = 0; }, 60000);
+      pSync();
     };
-    v.ontimeupdate = progress;
-    v.onwaiting = () => {
-      if (!st.played || st.stall || st.pending) return;
-      st.stall = setTimeout(() => {
-        st.stall = null;
-        if (playback === st && Date.now() - st.lastProgress >= 105000) scheduleReconnect(st, "nessun dato, forse una pubblicità");
-      }, 110000);
-    };
-    v.onerror = () => scheduleReconnect(st, "errore del player");
-    v.onended = () => scheduleReconnect(st, "flusso terminato");
-    if (!window.mpegts || !mpegts.isSupported()) { playerStatus("Questo browser non supporta la riproduzione della diretta (serve Media Source Extensions).", true); return; }
-    const p = mpegts.createPlayer({ type: "mpegts", isLive: true, url: st.url }, {
-      lazyLoad: false, enableStashBuffer: true, stashInitialSize: 384 * 1024, liveBufferLatencyChasing: false,
-      fixAudioTimestampGap: true, autoCleanupSourceBuffer: true, autoCleanupMaxBackwardDuration: 30, autoCleanupMinBackwardDuration: 15,
-    });
-    mts = p;
-    p.attachMediaElement(v);
-    p.on(mpegts.Events.ERROR, (_t, detail) => { if (mts === p) scheduleReconnect(st, detail ? String(detail).toLowerCase().replaceAll("_", " ") : "errore di decodifica"); });
-    p.load();
-    v.play().catch(() => playerStatus("Premi Play per avviare."));
-  }
-  async function openPlayer({ title, url, live, ts, external, tally }) {
-    stopHover();
-    endPlayback(); destroyPlayer();
-    $("#playerTitle").textContent = title;
-    $("#playerTally").className = `player-tally ${tally || ""}`;
-    const ext = $("#playerExternal");
-    ext.hidden = !external; if (external) ext.href = external;
-    $("#playerNote").textContent = live
-      ? (tally === "rec" ? "Visione dal flusso già in registrazione: nessuna connessione in più verso la piattaforma." : "Flusso temporaneo, condiviso fra tutte le finestre aperte e chiuso quando l'ultima viene chiusa. Non crea file.")
-      : "Se il browser non riproduce questo formato, scarica il file.";
-    $("#player").classList.add("open");
-    $("#player").setAttribute("aria-hidden", "false");
-    playerStatus("Caricamento…");
-    if (live || ts) {
-      try { await loadMpegts(); } catch { playerStatus("Impossibile caricare il lettore video (mpegts.js). Controlla la connessione a internet.", true); return; }
+    v.onwaiting = () => { if (src.live) pStatus("In attesa del flusso…"); };
+    v.onpause = v.onplay = v.ontimeupdate = v.onvolumechange = pSync;
+    v.onended = () => { if (src.live) pReconnect("il flusso si è interrotto"); else pSync(); };
+    v.onerror = () => src.live ? pReconnect("errore di riproduzione") : pStatus("Il browser non riesce a riprodurre questo file. Puoi scaricarlo.", { error: true });
+
+    const needsMpegts = src.live || src.ts;
+    if (needsMpegts) {
+      if (!window.mpegts || !mpegts.isSupported()) {
+        pStatus("Questo browser non supporta la riproduzione MPEG-TS (serve Media Source Extensions).", { error: true });
+        return;
+      }
+      const m = mpegts.createPlayer(
+        { type: "mpegts", isLive: !!src.live, url: src.url, duration: src.live ? undefined : (src.duration ? src.duration * 1000 : undefined) },
+        src.live ? {
+          enableWorker: true, lazyLoad: false, enableStashBuffer: true, stashInitialSize: 256 * 1024,
+          liveBufferLatencyChasing: true, liveBufferLatencyMaxLatency: 10, liveBufferLatencyMinRemain: 3,
+          liveSync: true, liveSyncMaxLatency: 10, liveSyncTargetLatency: 4, liveSyncPlaybackRate: 1.1,
+          fixAudioTimestampGap: true, autoCleanupSourceBuffer: true,
+          autoCleanupMaxBackwardDuration: 20, autoCleanupMinBackwardDuration: 10,
+        } : { enableWorker: true, lazyLoad: true, seekType: "range", fixAudioTimestampGap: true, autoCleanupSourceBuffer: true },
+      );
+      P.mts = m;
+      m.attachMediaElement(v);
+      m.on(mpegts.Events.ERROR, (_type, detail) => {
+        if (P.mts !== m) return;
+        if (src.live) pReconnect(String(detail || "errore di rete").toLowerCase().replaceAll("_", " "));
+        else pStatus("Il file non si può riprodurre nel browser. Puoi scaricarlo.", { error: true });
+      });
+      m.load();
+    } else {
+      v.src = src.url;
     }
-    if (live) { playback = { url, tries: 0, closed: false }; attachLive(playback); return; }
-    const v = $("#video");
-    const fail = () => playerStatus("Il browser non riesce a riprodurre questo file. Puoi scaricarlo.", true);
-    v.onplaying = () => playerStatus("");
-    v.onerror = fail;
-    if (ts && window.mpegts && mpegts.isSupported()) {
-      mts = mpegts.createPlayer({ type: "mpegts", isLive: false, url }, { lazyLoad: true, enableStashBuffer: true, fixAudioTimestampGap: true });
-      mts.attachMediaElement(v); mts.on(mpegts.Events.ERROR, fail); mts.load();
-      v.play().catch(() => playerStatus("Premi Play per avviare."));
-    } else { v.onloadedmetadata = () => v.play().catch(() => playerStatus("Premi Play per avviare.")); v.src = url; }
+    pStatus("Caricamento…");
+    P.lastTime = -1; P.idleSince = Date.now();
+    v.play().catch(() => { pStatus(""); pSync(); });
+    clearInterval(P.timers.watch);
+    if (src.live) P.timers.watch = setInterval(pWatchdog, 2000);
   }
-  function closePlayer() {
-    endPlayback(); destroyPlayer();
-    $("#player").classList.remove("open");
-    $("#player").setAttribute("aria-hidden", "true");
+
+  // Se il video resta fermo (nessun avanzamento) per 15 s mentre dovrebbe suonare, si riconnette.
+  function pWatchdog() {
+    const v = P.v();
+    if (!P.src?.live || v.paused) { P.idleSince = Date.now(); return; }
+    if (v.currentTime !== P.lastTime) { P.lastTime = v.currentTime; P.idleSince = Date.now(); }
+    else if (Date.now() - P.idleSince > 15000) { pReconnect("flusso fermo"); return; }
+    // Troppo indietro rispetto alla diretta (dopo una pausa o un rallentamento): salta in avanti.
+    const edge = v.buffered.length ? v.buffered.end(v.buffered.length - 1) : 0;
+    if (edge - v.currentTime > 25) v.currentTime = edge - 3;
+    pSync();
   }
+
+  function pReconnect(reason) {
+    if (!P.src?.live || P.timers.retry) return;
+    clearInterval(P.timers.watch);
+    if (P.tries >= MAX_TRIES) {
+      pDetach();
+      pStatus(`La diretta non risponde (${reason}).`, { error: true, retry: true });
+      return;
+    }
+    P.tries++;
+    const delay = Math.min(10000, 1000 * 2 ** (P.tries - 1));
+    pStatus(`Riconnessione: ${reason}. Tentativo ${P.tries} di ${MAX_TRIES}…`);
+    P.timers.retry = setTimeout(() => { P.timers.retry = null; pAttach(); }, delay);
+  }
+
+  function pSync() {
+    const v = P.v(), src = P.src;
+    if (!src) return;
+    $("#pcPlay").innerHTML = icon(v.paused ? "play" : "pause");
+    $("#pcPlay").setAttribute("aria-label", v.paused ? "Riproduci" : "Pausa");
+    const muted = v.muted || v.volume === 0;
+    $("#pcMute").innerHTML = icon(muted ? "volume-x" : "volume");
+    $("#pcMute").setAttribute("aria-label", muted ? "Riattiva l'audio" : "Disattiva l'audio");
+    if (document.activeElement !== $("#pcVol")) $("#pcVol").value = muted ? 0 : v.volume;
+    if (src.live) {
+      const edge = v.buffered.length ? v.buffered.end(v.buffered.length - 1) : 0;
+      const behind = edge && edge - v.currentTime > 8;
+      const live = $("#pcLive");
+      live.classList.toggle("behind", !!behind);
+      live.title = behind ? `${Math.round(edge - v.currentTime)} s dietro la diretta: clic per tornare in diretta` : "Sei in diretta";
+      $("#pcTime").textContent = src.since ? duration(serverNow() - src.since) : "";
+    } else {
+      const total = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : (src.duration || 0);
+      $("#pcTime").textContent = `${clock(v.currentTime)} / ${clock(total)}`;
+      if (total && document.activeElement !== $("#pcSeek")) $("#pcSeek").value = Math.round((v.currentTime / total) * 1000);
+    }
+  }
+
+  function pShowControls() {
+    const el = P.el();
+    el.classList.remove("idle");
+    clearTimeout(P.timers.idle);
+    P.timers.idle = setTimeout(() => { if (!P.v().paused && !el.matches(":focus-within .pc *")) el.classList.add("idle"); }, 2500);
+  }
+
+  async function openPlayer(src) {
+    closePlayer(true);
+    P.src = src; P.tries = 0;
+    const el = P.el();
+    el.classList.toggle("is-live", !!src.live);
+    $("#playerTitle").textContent = src.title;
+    $("#playerSub").innerHTML = src.sub || "";
+    $("#playerAvatar").innerHTML = src.avatar || "";
+    $("#playerAvatar").hidden = !src.avatar;
+    const ext = $("#playerExternal");
+    ext.hidden = !src.external; if (src.external) ext.href = src.external;
+    const dl = $("#playerDownload");
+    dl.hidden = !src.download; if (src.download) dl.href = src.download;
+    $("#pcSeek").value = 0;
+    el.classList.add("open");
+    el.setAttribute("aria-hidden", "false");
+    pShowControls();
+    pStatus("Caricamento…");
+    if (src.live || src.ts) {
+      try { await loadMpegts(); } catch {
+        pStatus("Impossibile caricare il lettore (mpegts.js). Controlla la connessione a internet.", { error: true });
+        return;
+      }
+    }
+    if (P.src !== src) return;
+    pAttach();
+    setTimeout(() => $("#pcPlay").focus(), 50);
+  }
+
+  function closePlayer(silent = false) {
+    pClearTimers();
+    pDetach();
+    P.src = null;
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
+    if (!silent) { P.el().classList.remove("open"); P.el().setAttribute("aria-hidden", "true"); }
+  }
+
   function watch(name) {
     const ch = S.channels.get(name);
     if (!ch) return;
+    const meta = [ch.game, ch.viewers != null ? `${compact(ch.viewers)} spettatori` : "",
+      ch.actually_recording ? "dal flusso in registrazione" : "flusso temporaneo, nessun file"].filter(Boolean);
     openPlayer({
-      title: `${ch.display_name || ch.name}${ch.title ? " — " + ch.title : ""}`,
+      live: true,
       url: `/live/${encodeURIComponent(ch.platform)}/${encodeURIComponent(ch.name)}`,
-      live: true, external: ch.home_url, tally: ch.actually_recording ? "rec" : "air",
+      title: ch.title || ch.display_name || ch.name,
+      sub: `<b>${esc(ch.display_name || ch.name)}</b>${meta.map((m) => `<span>${esc(m)}</span>`).join("")}`,
+      avatar: isMinimal() ? "" : avatarHtml(ch),
+      external: ch.home_url,
+      since: tsSeconds(ch.stream_started_at) || ch.rec_started_at || null,
     });
   }
+  function playFile(file) {
+    const r = S.recordings.find((x) => x.name === file);
+    const ch = r && S.channels.get(r.channel);
+    const when = r ? new Date(r.order_ts * 1000).toLocaleString("it-IT", { dateStyle: "medium", timeStyle: "short" }) : "";
+    openPlayer({
+      live: false, ts: file.toLowerCase().endsWith(".ts"),
+      url: `/recordings/${encodeURIComponent(file)}`,
+      download: `/recordings/${encodeURIComponent(file)}?dl=1`,
+      title: r?.title || file,
+      sub: `<b>${esc(ch?.display_name || r?.channel || "")}</b><span>${esc(when)}</span>${r?.game ? `<span>${esc(r.game)}</span>` : ""}`,
+      avatar: isMinimal() || !ch ? "" : avatarHtml(ch),
+      duration: r?.duration || 0,
+    });
+  }
+
+  // Controlli
+  const pv = () => P.v();
+  $("#pcPlay").addEventListener("click", () => { const v = pv(); if (v.paused) v.play().catch(() => {}); else v.pause(); });
+  $("#playerStage").addEventListener("click", (e) => {
+    if (e.target.closest(".pc, .player-status")) return;
+    const v = pv(); if (v.paused) v.play().catch(() => {}); else v.pause();
+  });
+  $("#playerStage").addEventListener("dblclick", (e) => { if (!e.target.closest(".pc")) toggleFullscreen(); });
+  $("#pcMute").addEventListener("click", () => { const v = pv(); v.muted = !v.muted; if (!v.muted && v.volume === 0) v.volume = 0.5; store.set("tr-muted", v.muted ? "1" : "0"); });
+  $("#pcVol").addEventListener("input", (e) => { const v = pv(); v.volume = Number(e.target.value); v.muted = v.volume === 0; store.set("tr-volume", String(v.volume)); store.set("tr-muted", v.muted ? "1" : "0"); });
+  $("#pcSeek").addEventListener("input", (e) => {
+    const v = pv(), total = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : (P.src?.duration || 0);
+    if (total) v.currentTime = (Number(e.target.value) / 1000) * total;
+  });
+  $("#pcLive").addEventListener("click", () => {
+    const v = pv(); if (v.buffered.length) v.currentTime = v.buffered.end(v.buffered.length - 1) - 2; v.play().catch(() => {});
+  });
+  $("#playerRetry").addEventListener("click", () => { P.tries = 0; pAttach(); });
+  function toggleFullscreen() {
+    const stage = $("#playerStage");
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else (stage.requestFullscreen?.() || Promise.reject()).catch(() => {});
+  }
+  $("#pcFull").addEventListener("click", toggleFullscreen);
+  document.addEventListener("fullscreenchange", () => {
+    $("#pcFull").innerHTML = icon(document.fullscreenElement ? "minimize" : "maximize");
+  });
+  $("#pcPip").hidden = !document.pictureInPictureEnabled;
+  $("#pcPip").addEventListener("click", () => {
+    if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
+    else pv().requestPictureInPicture?.().catch(() => {});
+  });
+  ["mousemove", "pointerdown", "keydown"].forEach((t) => P.el().addEventListener(t, pShowControls));
+  P.el().addEventListener("keydown", (e) => {
+    if (!P.src || e.target.matches("input[type=range]") && ["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+    const v = pv();
+    if (e.key === " " || e.key === "k") { e.preventDefault(); if (v.paused) v.play().catch(() => {}); else v.pause(); }
+    else if (e.key === "m") $("#pcMute").click();
+    else if (e.key === "f") toggleFullscreen();
+    else if (!P.src.live && e.key === "ArrowRight") v.currentTime += 10;
+    else if (!P.src.live && e.key === "ArrowLeft") v.currentTime = Math.max(0, v.currentTime - 10);
+  });
 
   // ── Selezione multipla ──
   function setSelecting(on) {
     S.selecting = on;
-    stopHover();
     if (!on) S.selected.clear();
     document.body.classList.toggle("selecting", on);
     $$('[data-cmd="select-mode"]').forEach((b) => b.setAttribute("aria-pressed", String(on)));
@@ -933,7 +1050,7 @@
       const rec = S.recordings.find((r) => r.name === file);
       if (actEl.dataset.act === "play-file") {
         if (rec?.in_use) { const ch = S.channels.get(rec.channel); if (ch) return watch(ch.name); }
-        return openPlayer({ title: file, url: `/recordings/${encodeURIComponent(file)}`, live: false, ts: file.toLowerCase().endsWith(".ts") });
+        return playFile(file);
       }
       if (await confirmDialog(`Eliminare definitivamente ${file}?`, "Elimina")) {
         const r = await api("/api/delete_recording", { filename: file });
@@ -955,7 +1072,7 @@
     if (t.id === "bulkRerun" && t.value) { await runBulk("rerun_policy", t.value === "default" ? "" : t.value); t.value = ""; return; }
     if (t.id === "importFile" && t.files[0]) { await importFile(t.files[0]); t.value = ""; return; }
     if (t.id === "uiMode") {
-      S.uiMode = t.value; store.set("tr-ui", S.uiMode); applyUiMode(); stopHover();
+      S.uiMode = t.value; store.set("tr-ui", S.uiMode); applyUiMode();
       for (const m of [tiles, rows]) for (const el of m.values()) { el.querySelectorAll(".mon-empty, .avatar, .tools, .plat-slot").forEach((n) => { n._html = null; n._sig = null; }); }
       recNodes.forEach((n) => { n._sig = null; });
       scheduleRender({ recordings: true }); return;
@@ -1018,6 +1135,7 @@
     if (e.key === "s") setSelecting(!S.selecting);
   });
   $("#player").addEventListener("click", (e) => { if (e.target.id === "player") closePlayer(); });
+
 
   // Contatori che scorrono senza attendere il server.
   let tick = 0;
