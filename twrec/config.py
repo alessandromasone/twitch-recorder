@@ -73,8 +73,20 @@ DEDUP_ENABLED = _env_bool("DEDUP_ENABLED")
 DEDUP_BYTES = max(64 * 1024, _env_int("DEDUP_BYTES", 2 * 1024 * 1024))
 DEDUP_FILE = os.getenv("DEDUP_FILE", "").strip() or os.path.join(DATA_DIR, "dedup_hashes.json")
 HISTORY_FILE = os.getenv("HISTORY_FILE", "").strip() or os.path.join(DATA_DIR, "channel_history.json")
-RECORDINGS_META_FILE = os.path.join(RECORDINGS_DIR, ".recordings_meta.json")
-THUMBS_DIR = os.path.join(RECORDINGS_DIR, ".thumbs")
+# Titolo, categoria e rerun di ogni file: accanto a channels.json, non tra i video.
+RECORDINGS_META_FILE = os.path.join(DATA_DIR, "recordings_meta.json")
+# Percorsi usati fino alla 2.0: vengono migrati o rimossi all'avvio.
+LEGACY_META_FILE = os.path.join(RECORDINGS_DIR, ".recordings_meta.json")
+LEGACY_THUMBS_DIR = os.path.join(RECORDINGS_DIR, ".thumbs")
+# Miniature dei file conclusi tenute solo in memoria (non vengono mai salvate su disco).
+RECORDING_THUMBS_CACHE = 300
+# Log di Streamlink/FFmpeg per canale (recordings/.<canale>.log). false = nessun file di log.
+RECORDING_LOGS = _env_bool("RECORDING_LOGS", "true")
+# Oltre questa dimensione il log viene ruotato in .<canale>.log.1 (al massimo due file per canale).
+try:
+    RECORDING_LOG_MAX_MB = max(0.1, float(os.getenv("RECORDING_LOG_MAX_MB", "5")))
+except ValueError:
+    RECORDING_LOG_MAX_MB = 5.0
 # Interfaccia minimal: lista densa di solo testo, senza copertine, avatar e animazioni.
 # Ogni browser può comunque cambiarla dalle impostazioni del pannello.
 MINIMAL_UI = _env_bool("MINIMAL_UI")

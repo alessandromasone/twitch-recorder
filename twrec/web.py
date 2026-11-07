@@ -16,7 +16,7 @@ from datetime import timedelta
 
 from flask import (
     Flask, Response, abort, jsonify, redirect, render_template, request,
-    send_file, send_from_directory, session, url_for,
+    send_from_directory, session, url_for,
 )
 
 from . import actions, monitor, preview, state, status, storage
@@ -251,10 +251,11 @@ def thumb_live(room):
 
 @app.route("/thumb/rec/<path:filename>.jpg")
 def thumb_recording(filename):
-    path = storage.recording_thumb(filename)
-    if not path:
-        abort(404)
-    return send_file(path, mimetype="image/jpeg", max_age=86400 * 7)
+    image = storage.recording_thumb(filename)
+    if not image:
+        return Response(status=204, headers={"Cache-Control": "no-store"})
+    # Il browser la tiene in cache: il server non la salva su disco.
+    return Response(image, mimetype="image/jpeg", headers={"Cache-Control": "private, max-age=604800"})
 
 
 # ── API ──
@@ -492,6 +493,7 @@ def _shutdown() -> None:
 
 
 def boot() -> None:
+    storage.cleanup_legacy_files()
     state.init()
     with state.lock:
         for ch in state.channels:

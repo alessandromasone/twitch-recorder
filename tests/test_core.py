@@ -284,3 +284,55 @@ def test_low_disk_blocks_new_recordings(client, monkeypatch):
     assert not state.recorders["diskfull"].is_recording
     assert "Spazio libero insufficiente" in state.find_channel("diskfull")["last_error"]
     _api(client, action="remove", channel="diskfull")
+
+
+def test_channel_log_rotation_and_disable(monkeypatch, tmp_path):
+    from twrec import recorder
+    monkeypatch.setattr(recorder, "RECORDINGS_DIR", str(tmp_path))
+    monkeypatch.setattr(recorder, "RECORDING_LOG_MAX_MB", 0.001)       # ~1 KB
+    (tmp_path / ".canale.log").write_text("x" * 5000)
+    fh = recorder.open_channel_log("canale")
+    fh.write("nuovo\n"); fh.close()
+    assert (tmp_path / ".canale.log.1").stat().st_size == 5000
+    assert (tmp_path / ".canale.log").read_text() == "nuovo\n"
+    monkeypatch.setattr(recorder, "RECORDING_LOGS", False)
+    assert recorder.open_channel_log("canale") is None
+
+
+def test_recording_thumbs_stay_in_memory(tmp_path, monkeypatch):
+    import os
+    import shutil
+    import subprocess
+    from twrec import storage
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg non disponibile")
+    rec_dir = tmp_path / "rec"
+    rec_dir.mkdir()
+    monkeypatch.setattr(storage, "RECORDINGS_DIR", str(rec_dir))
+    video = rec_dir / "canale_2026-11-08_10-00-00.ts"
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                    "testsrc2=size=320x180:rate=10", "-t", "4", "-c:v", "libx264", "-g", "10", str(video)], check=True)
+    first = storage.recording_thumb(video.name)
+    assert first and first[:2] == b"\xff\xd8"                   # JPEG
+    assert storage.recording_thumb(video.name) is first          # seconda volta dalla cache
+    assert sorted(os.listdir(rec_dir)) == [video.name]           # nessun file accanto al video
+
+
+def test_legacy_files_cleanup(tmp_path, monkeypatch):
+    from twrec import storage
+    rec_dir = tmp_path / "rec"
+    (rec_dir / ".thumbs").mkdir(parents=True)
+    (rec_dir / ".thumbs" / "x.ts.jpg").write_bytes(b"jpg")
+    (rec_dir / ".recordings_meta.json").write_text('{"a.ts": {"title": "t"}}')
+    (rec_dir / ".canale.log").write_text("log")
+    (rec_dir / "a.ts").write_bytes(b"video")
+    new_meta = tmp_path / "recordings_meta.json"
+    monkeypatch.setattr(storage, "RECORDINGS_DIR", str(rec_dir))
+    monkeypatch.setattr(storage, "LEGACY_THUMBS_DIR", str(rec_dir / ".thumbs"))
+    monkeypatch.setattr(storage, "LEGACY_META_FILE", str(rec_dir / ".recordings_meta.json"))
+    monkeypatch.setattr(storage, "RECORDINGS_META_FILE", str(new_meta))
+    import twrec.config as cfg
+    monkeypatch.setattr(cfg, "RECORDING_LOGS", False)
+    storage.cleanup_legacy_files()
+    assert [p.name for p in rec_dir.iterdir()] == ["a.ts"]
+    assert "title" in new_meta.read_text()

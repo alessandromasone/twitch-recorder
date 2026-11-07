@@ -163,10 +163,12 @@ Helix segnala l'inizio di una live con qualche decina di secondi di ritardo. Abb
 | `PREVIEW_LINGER_SECONDS` | `10` | La sorgente temporanea resta aperta dopo l'ultimo spettatore |
 | `AUTO_CONVERT` / `DELETE_AFTER_CONVERT` | `false` / `false` | Remux TS→MP4 a fine file; elimina il TS solo se la conversione riesce |
 | `DEDUP_ENABLED` | `false` | Elimina i file conclusi identici a uno già registrato |
-| `RECORDING_THUMBS` | `true` | Miniature dei file conclusi (`false` con `MINIMAL_UI`) |
+| `RECORDING_THUMBS` | `true` | Miniature dei file conclusi nella lista registrazioni (`false` con `MINIMAL_UI`). Sono generate al volo e tenute solo in memoria: su disco non viene salvato nulla |
+| `RECORDING_LOGS` | `true` | Log di Streamlink e FFmpeg per canale in `recordings/.<canale>.log`; con `false` non vengono scritti e quelli vecchi vengono eliminati all'avvio |
+| `RECORDING_LOG_MAX_MB` | `5` | Oltre questa dimensione il log viene ruotato in `.log.1` (al massimo due file per canale) |
 | `MINIMAL_UI` | `false` | Versione minimal predefinita |
 
-I segmenti più piccoli di 4 KB, per esempio quando una live non parte, vengono eliminati.
+I segmenti più piccoli di 4 KB, per esempio quando una live non parte, vengono eliminati. Con `RECORDING_LOGS=false` la cartella delle registrazioni contiene solo i video: i metadati (titolo, categoria, rerun) stanno in `recordings_meta.json` accanto a `channels.json`.
 
 ### Notifiche
 

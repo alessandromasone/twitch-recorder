@@ -1,6 +1,7 @@
 """File delle registrazioni: nomi, indice in cache, metadati, miniature, dedup e conversione."""
 
 import hashlib
+from collections import OrderedDict
 import os
 import re
 import shutil
@@ -13,7 +14,7 @@ from . import state
 from .config import (
     AUTO_CONVERT, DEDUP_BYTES, DEDUP_ENABLED, DEDUP_FILE, DELETE_AFTER_CONVERT,
     FILE_EXTENSION, FILENAME_FORMAT, RECORDING_THUMBS, RECORDINGS_DIR,
-    RECORDINGS_META_FILE, THUMBS_DIR, VIDEO_EXTS, logger,
+    LEGACY_META_FILE, LEGACY_THUMBS_DIR, RECORDING_THUMBS_CACHE, RECORDINGS_META_FILE, VIDEO_EXTS, logger,
 )
 from .util import human_size, read_json, write_json_atomic
 
@@ -252,11 +253,8 @@ def delete_recording(filename: str) -> tuple[bool, str]:
         os.remove(path)
     except OSError as exc:
         return False, str(exc)
-    for suffix in (".jpg", ".none"):
-        try:
-            os.remove(os.path.join(THUMBS_DIR, os.path.basename(path) + suffix))
-        except OSError:
-            pass
+    with _thumb_cache_lock:
+        _thumb_cache.pop(os.path.basename(path), None)
     drop_meta(os.path.basename(path))
     index.invalidate()
     return True, "File eliminato."
@@ -267,43 +265,84 @@ def delete_recording(filename: str) -> tuple[bool, str]:
 _thumb_sem = threading.Semaphore(1)
 
 
-def recording_thumb(filename: str) -> str | None:
-    """Genera (una sola volta) una miniatura JPEG di una registrazione conclusa."""
+_thumb_cache_lock = threading.Lock()
+# name -> (dimensione del file quando è stata creata, JPEG oppure None se non estraibile)
+_thumb_cache: "OrderedDict[str, tuple[int, bytes | None]]" = OrderedDict()
+
+
+def recording_thumb(filename: str) -> bytes | None:
+    """Miniatura JPEG di una registrazione conclusa, generata al volo e tenuta solo in memoria.
+
+    Nessun file viene scritto: dopo un riavvio la miniatura si rigenera alla prima richiesta.
+    La cache contiene al massimo RECORDING_THUMBS_CACHE immagini (circa 15 KB l'una).
+    """
     if not RECORDING_THUMBS:
         return None
     path = safe_recording_path(filename)
     if not path or not os.path.isfile(path):
         return None
     name = os.path.basename(path)
-    out = os.path.join(THUMBS_DIR, name + ".jpg")
-    marker = os.path.join(THUMBS_DIR, name + ".none")
-    if os.path.exists(out):
-        return out
-    if os.path.exists(marker) or name in active_files():
+    if name in active_files():
         return None
-    os.makedirs(THUMBS_DIR, exist_ok=True)
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return None
+    with _thumb_cache_lock:
+        cached = _thumb_cache.get(name)
+        if cached and cached[0] == size:
+            _thumb_cache.move_to_end(name)
+            return cached[1]
     with _thumb_sem:
-        if os.path.exists(out):
-            return out
+        image = None
         try:
-            size = os.path.getsize(path)
             offset = 30 if size > 64 * 1024 * 1024 else 2
             result = subprocess.run(
-                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
                  "-ss", str(offset), "-skip_frame", "nokey", "-i", path,
-                 "-frames:v", "1", "-vf", "scale=320:-2", "-q:v", "6", out],
+                 "-frames:v", "1", "-vf", "scale=320:-2", "-q:v", "6",
+                 "-f", "image2", "-c:v", "mjpeg", "pipe:1"],
                 capture_output=True, timeout=25,
             )
-            if result.returncode == 0 and os.path.exists(out) and os.path.getsize(out) > 0:
-                return out
+            if result.returncode == 0 and result.stdout:
+                image = result.stdout
         except (OSError, subprocess.TimeoutExpired) as exc:
             logger.debug("Miniatura non generata per %s: %s", name, exc)
+    with _thumb_cache_lock:
+        _thumb_cache[name] = (size, image)
+        while len(_thumb_cache) > RECORDING_THUMBS_CACHE:
+            _thumb_cache.popitem(last=False)
+    return image
+
+
+def cleanup_legacy_files() -> None:
+    """La cartella delle registrazioni deve contenere solo video: migra o rimuove i file della 2.0."""
+    if os.path.isfile(LEGACY_META_FILE):
         try:
-            with open(marker, "w"):
-                pass
+            if not os.path.exists(RECORDINGS_META_FILE):
+                os.makedirs(os.path.dirname(os.path.abspath(RECORDINGS_META_FILE)), exist_ok=True)
+                shutil.move(LEGACY_META_FILE, RECORDINGS_META_FILE)
+                logger.info("Metadati delle registrazioni spostati in %s", RECORDINGS_META_FILE)
+            else:
+                os.remove(LEGACY_META_FILE)
+        except OSError as exc:
+            logger.warning("Metadati delle registrazioni non spostati: %s", exc)
+    if os.path.isdir(LEGACY_THUMBS_DIR):
+        shutil.rmtree(LEGACY_THUMBS_DIR, ignore_errors=True)
+        logger.info("Rimossa la vecchia cartella delle miniature %s", LEGACY_THUMBS_DIR)
+    from .config import RECORDING_LOGS
+    if not RECORDING_LOGS:
+        # Log per canale disattivati: si eliminano anche quelli rimasti da prima.
+        removed = 0
+        try:
+            for entry in os.scandir(RECORDINGS_DIR):
+                if entry.is_file() and entry.name.startswith(".") and (entry.name.endswith(".log") or entry.name.endswith(".log.1")):
+                    os.remove(entry.path)
+                    removed += 1
         except OSError:
             pass
-        return None
+        if removed:
+            logger.info("RECORDING_LOGS=false: eliminati %d vecchi log dei canali", removed)
 
 
 def frame_from_bytes(data: bytes, timeout: float = 15, label: str = "") -> bytes | None:

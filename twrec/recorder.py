@@ -9,7 +9,8 @@ import time
 from . import notify, state, storage
 from .checks import PRIVATE_PHRASES, check_channel, streamlink_base_command
 from .config import (
-    DEFAULT_PLATFORM, MAX_FILE_SIZE, RECONNECT_TRIES, RECONNECT_WAIT, RECORDINGS_DIR, logger,
+    DEFAULT_PLATFORM, MAX_FILE_SIZE, RECONNECT_TRIES, RECONNECT_WAIT, RECORDING_LOG_MAX_MB,
+    RECORDING_LOGS, RECORDINGS_DIR, logger,
 )
 from .hub import LiveStreamHub
 from .quality import fallback_list, parse_opened_quality
@@ -53,6 +54,23 @@ def pump_stderr(proc: subprocess.Popen, log_fh, on_line=None) -> None:
             stream.close()
         except OSError:
             pass
+
+
+def open_channel_log(channel_name: str):
+    """Apre il log del canale in append, ruotandolo oltre RECORDING_LOG_MAX_MB. None se disattivato."""
+    if not RECORDING_LOGS:
+        return None
+    path = os.path.join(RECORDINGS_DIR, f".{channel_name}.log")
+    try:
+        if os.path.getsize(path) > RECORDING_LOG_MAX_MB * 1024 * 1024:
+            os.replace(path, path + ".1")
+    except OSError:
+        pass
+    try:
+        return open(path, "a", encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Log di %s non scrivibile: %s", channel_name, exc)
+        return None
 
 
 def terminate(proc: subprocess.Popen | None, wait: float = 3) -> None:
@@ -173,7 +191,6 @@ class Recorder:
             streamlink_cmd = streamlink_base_command(self.platform) + [
                 "--stdout", platform_url(self.platform, self.channel_name), fallback_list(self.quality),
             ]
-            log_path = os.path.join(RECORDINGS_DIR, f".{self.channel_name}.log")
             t0 = time.time()
             source = process = None
             exit_code = None
@@ -181,14 +198,15 @@ class Recorder:
             written = 0
             split_threshold = max(int(MAX_FILE_SIZE * 0.97), MAX_FILE_SIZE - 20 * 1024 * 1024) if MAX_FILE_SIZE > 0 else 0
             try:
-                log_fh = open(log_path, "a", encoding="utf-8")
+                log_fh = open_channel_log(self.channel_name)
                 with open(output_path, "wb", buffering=0) as out:
                     source = subprocess.Popen(streamlink_cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                               stderr=subprocess.PIPE, bufsize=0, start_new_session=True)
                     threading.Thread(target=pump_stderr, args=(source, log_fh, self._on_streamlink_line),
                                      daemon=True, name=f"sl-log-{self.channel_name}").start()
+                    # Senza log, lo stderr di FFmpeg va scartato (non nei log del container).
                     process = subprocess.Popen(remux_command(), stdin=source.stdout, stdout=subprocess.PIPE,
-                                               stderr=log_fh, bufsize=0, start_new_session=True)
+                                               stderr=log_fh or subprocess.DEVNULL, bufsize=0, start_new_session=True)
                     source.stdout.close()
                     with self._lock:
                         self.source_process, self.process = source, process
