@@ -1,6 +1,6 @@
 services:
   twitch-recorder:
-    image: ghcr.io/${GITHUB_USER:-alessandromasone}/twitch-recorder:latest
+    image: ghcr.io/${GITHUB_USER:-alessandromasone}/twitch-recorder:${TAG:-latest}
     build: .
     container_name: twitch-recorder
     restart: unless-stopped

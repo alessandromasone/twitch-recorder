@@ -714,6 +714,7 @@
           <dt>Conversione MP4</dt><dd>${yes(c.auto_convert)}${c.auto_convert && c.delete_after_convert ? ", il TS viene eliminato" : ""}</dd>
           <dt>Deduplicazione</dt><dd>${yes(c.dedup_enabled)}</dd>
           <dt>Worker</dt><dd>${c.monitor_workers}</dd>
+          <dt>Versione</dt><dd>${esc(c.version || "dev")}</dd>
         </dl>
         <p class="muted" style="font-size:12.5px">Si modificano nel file .env e si applicano al riavvio del container.</p>
       </div>

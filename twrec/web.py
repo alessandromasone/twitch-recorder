@@ -22,7 +22,7 @@ from flask import (
 from . import actions, monitor, preview, state, status, storage
 from .actions import ActionError
 from .config import (
-    APP_PASSWORD, APP_SESSION_HOURS, CHANNELS_FILE, DATA_DIR, DEFAULT_PLATFORM, LOGIN_ENABLED, MINIMAL_UI,
+    APP_PASSWORD, APP_SESSION_HOURS, APP_VERSION, CHANNELS_FILE, DATA_DIR, DEFAULT_PLATFORM, LOGIN_ENABLED, MINIMAL_UI,
     QUALITY_OPTIONS, RECORDINGS_DIR, SESSION_COOKIE_SECURE, STREAM_QUALITY, logger,
 )
 from .recorder import Recorder
@@ -477,7 +477,7 @@ def health():
     monitor_state = "stopped" if not alive else ("degraded" if hb is not None and hb > 45 else "ok")
     return jsonify({
         "status": "ok" if alive else "degraded", "monitor_alive": alive, "monitor_state": monitor_state,
-        "monitor_inflight": len(state.monitor.inflight),
+        "monitor_inflight": len(state.monitor.inflight), "version": APP_VERSION,
     }), 200 if alive else 503
 
 
@@ -500,7 +500,7 @@ def boot() -> None:
     monitor.start()
     status.start()
     atexit.register(_shutdown)
-    logger.info("Twitch Recorder pronto — %d canali, dati in %s", len(state.channels), os.path.dirname(os.path.abspath(CHANNELS_FILE)))
+    logger.info("Twitch Recorder %s pronto — %d canali, dati in %s", APP_VERSION, len(state.channels), os.path.dirname(os.path.abspath(CHANNELS_FILE)))
 
 
 boot()

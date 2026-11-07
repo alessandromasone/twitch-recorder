@@ -1,0 +1,39 @@
+name: Test
+
+# Solo test: nessuna immagine viene pubblicata. Riutilizzato da preview e release.
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "LICENSE", ".env.example"]
+  pull_request:
+    paths-ignore: ["**.md", "LICENSE", ".env.example"]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Dipendenze
+        run: pip install -r requirements.txt pytest
+
+      - name: Controllo sintassi JavaScript
+        run: node --check static/app.js
+
+      - name: Test
+        run: python -m pytest -q

@@ -19,6 +19,7 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+APP_VERSION = os.getenv("APP_VERSION", "dev").strip() or "dev"
 CHANNELS_FILE = os.getenv("CHANNELS_FILE", "channels.json")
 DATA_DIR = os.path.dirname(os.path.abspath(CHANNELS_FILE)) or os.getcwd()
 RECORDINGS_DIR = os.getenv("RECORDINGS_DIR", "recordings")

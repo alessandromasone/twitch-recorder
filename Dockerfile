@@ -19,7 +19,14 @@ RUN chmod 644 static/vendor/mpegts.js
 
 RUN mkdir -p /data/recordings
 
-ENV CHANNELS_FILE=/data/channels.json \
+# Versione mostrata nel pannello e in /health (impostata dalle GitHub Action)
+ARG APP_VERSION=dev
+LABEL org.opencontainers.image.title="Twitch Recorder" \
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.licenses="MIT"
+
+ENV APP_VERSION=${APP_VERSION} \
+    CHANNELS_FILE=/data/channels.json \
     RECORDINGS_DIR=/data/recordings \
     STREAM_QUALITY=best \
     CHECK_INTERVAL=60 \
