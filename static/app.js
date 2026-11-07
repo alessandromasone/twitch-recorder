@@ -397,7 +397,9 @@
     const a = el.querySelector(".row-name a");
     a.href = ch.home_url; setText(a, ch.display_name || ch.name);
     setHtml(el.querySelector(".plat-slot"), platTag(ch));
-    if (isOnAir(ch)) {
+    if (isMinimal()) {
+      updateRowMinimal(el, ch, st);
+    } else if (isOnAir(ch)) {
       const level = rerunLevel(ch) || (ch.last_check_result === "rerun" ? "confirmed" : null);
       const tag = ch.actually_recording
         ? `<span class="live-tag rec">REC <span data-since="${ch.rec_started_at || ""}">${duration(serverNow() - (ch.rec_started_at || serverNow()))}</span></span>`
@@ -412,6 +414,36 @@
     el.querySelector(".row-status").classList.toggle("live", isOnAir(ch));
     setText(el.querySelector(".row-quality"), ch.quality);
     quickTools(el, ch, { compact: true });
+  }
+
+  // Minimal: due colonne fisse (stato breve + informazione), niente etichette piene.
+  function updateRowMinimal(el, ch, st) {
+    const level = rerunLevel(ch) || (ch.last_check_result === "rerun" ? "confirmed" : null);
+    let state, cls, info = "";
+    if (ch.actually_recording) {
+      state = `REC <span data-since="${ch.rec_started_at || ""}">${duration(serverNow() - (ch.rec_started_at || serverNow()))}</span>`; cls = "m-rec";
+    } else if (ch.last_check_result === "rerun") { state = "rerun"; cls = "m-cue"; }
+    else if (ch.online) { state = "live"; cls = "m-air"; }
+    else if (ch.sleeping) { state = "dorme"; cls = "m-off"; }
+    else if (ch.last_check_result === "verifying_offline") { state = `verifica ${ch.offline_confirmation_count}/${ch.offline_confirmations_required}`; cls = "m-cue"; }
+    else if (ch.last_check_result === "error") { state = "errore"; cls = "m-err"; }
+    else if (ch.last_check_result === "private") { state = "privata"; cls = "m-off"; }
+    else if (ch.last_status === "unknown" || ch.last_check_result === "checking") { state = "verifica"; cls = "m-off"; }
+    else { state = ch.is_recording ? "offline" : "in pausa"; cls = "m-off"; }
+    if (isOnAir(ch)) {
+      info = [ch.title ? `<span class="m-title" title="${esc(ch.title)}">${esc(ch.title)}</span>` : "",
+        ch.game ? `<span class="m-meta">${esc(ch.game)}</span>` : "",
+        ch.viewers != null ? `<span class="m-meta">${compact(ch.viewers)}</span>` : "",
+        level ? `<span class="m-cue">${level === "confirmed" ? "rerun" : "rerun?"}</span>` : ""].join("");
+    } else if (ch.last_check_result === "error" && ch.last_error) {
+      info = `<span class="m-meta" title="${esc(ch.last_error)}">${esc(ch.last_error)}</span>`;
+    } else if (!ch.sleeping) {
+      info = ch.last_live
+        ? `<span class="m-meta" title="${esc(fullDate(ch.last_live))}">ultima live <span data-rel="${esc(ch.last_live)}">${esc(ago(ch.last_live))}</span>${ch.single_live_mode ? ", Una volta attiva" : ""}</span>`
+        : `<span class="m-meta">nessuna live rilevata</span>`;
+    }
+    setHtml(el.querySelector(".row-status"), `<span class="m-state ${cls}">${state}</span>${info}`);
+    el.querySelector(".dot").className = `dot ${ch.actually_recording ? "error" : st.dot}`;
   }
 
   function syncContainer(container, map, list, make, update) {
@@ -761,20 +793,24 @@
         return;
       }
       const m = mpegts.createPlayer(
-        { type: "mpegts", isLive: !!src.live, url: src.url, duration: src.live ? undefined : (src.duration ? src.duration * 1000 : undefined) },
+        { type: "mpegts", isLive: !!src.live, url: new URL(src.url, location.href).href, duration: src.live ? undefined : (src.duration ? src.duration * 1000 : undefined) },
         src.live ? {
-          enableWorker: true, lazyLoad: false, enableStashBuffer: true, stashInitialSize: 256 * 1024,
+          enableWorker: false, lazyLoad: false, enableStashBuffer: true, stashInitialSize: 256 * 1024,
           liveBufferLatencyChasing: true, liveBufferLatencyMaxLatency: 10, liveBufferLatencyMinRemain: 3,
           liveSync: true, liveSyncMaxLatency: 10, liveSyncTargetLatency: 4, liveSyncPlaybackRate: 1.1,
           fixAudioTimestampGap: true, autoCleanupSourceBuffer: true,
           autoCleanupMaxBackwardDuration: 20, autoCleanupMinBackwardDuration: 10,
-        } : { enableWorker: true, lazyLoad: true, seekType: "range", fixAudioTimestampGap: true, autoCleanupSourceBuffer: true },
+        } : { enableWorker: false, lazyLoad: true, seekType: "range", fixAudioTimestampGap: true, autoCleanupSourceBuffer: true },
       );
       P.mts = m;
       m.attachMediaElement(v);
-      m.on(mpegts.Events.ERROR, (_type, detail) => {
+      m.on(mpegts.Events.ERROR, (type, detail, info) => {
         if (P.mts !== m) return;
-        if (src.live) pReconnect(String(detail || "errore di rete").toLowerCase().replaceAll("_", " "));
+        console.warn("[player]", type, detail, info);
+        const reason = type === mpegts.ErrorTypes?.MEDIA_ERROR ? "errore di decodifica"
+          : /HttpStatusCodeInvalid/i.test(detail) ? `il server ha risposto ${info?.code || "con un errore"}`
+            : /Timeout/i.test(detail) ? "nessuna risposta dal server" : "connessione interrotta";
+        if (src.live) pReconnect(reason);
         else pStatus("Il file non si può riprodurre nel browser. Puoi scaricarlo.", { error: true });
       });
       m.load();
@@ -1032,6 +1068,13 @@
         case "pause-all": return act(api("/api/room", { action: "pause_all" }));
         case "resume-all": return act(api("/api/room", { action: "resume_all" }));
         case "import": return $("#importFile")?.click();
+        case "toggle-add": {
+          const open = !document.body.classList.contains("adding");
+          document.body.classList.toggle("adding", open);
+          cmd.setAttribute("aria-expanded", String(open));
+          if (open) $("#addChannel").focus();
+          return;
+        }
       }
     }
     const chip = e.target.closest("[data-filter]");

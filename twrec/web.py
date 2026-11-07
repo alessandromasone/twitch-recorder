@@ -240,9 +240,13 @@ def preview_live(platform, room):
 @app.route("/thumb/live/<room>.jpg")
 def thumb_live(room):
     image = preview.live_thumbnail(room)
-    if not image:
-        abort(404)
-    return Response(image, mimetype="image/jpeg", headers={"Cache-Control": "private, max-age=60"})
+    if image:
+        return Response(image, mimetype="image/jpeg", headers={"Cache-Control": "private, max-age=60"})
+    ch = state.find_channel(room)
+    if ch and norm_platform(ch.get("platform")) == "twitch":
+        # Nessun fotogramma disponibile: si usa la copertina ufficiale di Twitch.
+        return redirect(f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{room}-440x248.jpg", code=302)
+    return Response(status=204, headers={"Cache-Control": "no-store"})
 
 
 @app.route("/thumb/rec/<path:filename>.jpg")

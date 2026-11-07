@@ -263,9 +263,11 @@ def live_thumbnail(room: str) -> bytes | None:
         if source:
             hub = source.hub
     if hub is None:
-        return None
-    image = storage.frame_from_bytes(hub.tail_bytes(3 * 1024 * 1024))
+        return cached[1] if cached else None
+    image = storage.frame_from_bytes(hub.tail_bytes(3 * 1024 * 1024), label=room)
     if image:
         with _thumb_lock:
             _thumb_cache[room] = (now, image)
-    return image
+        return image
+    # Estrazione non riuscita (per esempio durante una pubblicità): resta valida l'ultima buona.
+    return cached[1] if cached else None

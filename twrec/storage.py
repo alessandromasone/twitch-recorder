@@ -297,22 +297,34 @@ def recording_thumb(filename: str) -> str | None:
         return None
 
 
-def frame_from_bytes(data: bytes, timeout: float = 15) -> bytes | None:
-    """Estrae un fotogramma chiave JPEG da un frammento MPEG-TS (usato per le miniature live)."""
+def frame_from_bytes(data: bytes, timeout: float = 15, label: str = "") -> bytes | None:
+    """Estrae un fotogramma JPEG da un frammento MPEG-TS (miniature live).
+
+    Primo tentativo: solo fotogrammi chiave (veloce). Se non riesce, decodifica tutto e
+    prende il primo I-frame. L'errore di FFmpeg viene registrato per la diagnosi.
+    """
     if not data:
         return None
+    attempts = (
+        ["-skip_frame", "nokey", "-f", "mpegts", "-i", "pipe:0", "-frames:v", "1", "-vf", "scale=440:-2"],
+        ["-f", "mpegts", "-i", "pipe:0", "-frames:v", "1", "-vf", "select='eq(pict_type,I)',scale=440:-2", "-vsync", "0"],
+    )
+    error = ""
     with _thumb_sem:
-        try:
-            result = subprocess.run(
-                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
-                 "-skip_frame", "nokey", "-f", "mpegts", "-i", "pipe:0",
-                 "-frames:v", "1", "-vf", "scale=440:-2", "-q:v", "6",
-                 "-f", "image2", "-c:v", "mjpeg", "pipe:1"],
-                input=data, capture_output=True, timeout=timeout,
-            )
-            return result.stdout if result.returncode == 0 and result.stdout else None
-        except (OSError, subprocess.TimeoutExpired):
-            return None
+        for args in attempts:
+            try:
+                result = subprocess.run(
+                    ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", *args,
+                     "-q:v", "6", "-f", "image2", "-c:v", "mjpeg", "pipe:1"],
+                    input=data, capture_output=True, timeout=timeout,
+                )
+                if result.returncode == 0 and result.stdout:
+                    return result.stdout
+                error = (result.stderr or b"").decode("utf-8", errors="replace").strip()[-300:]
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                error = str(exc)
+    logger.info("Miniatura live non estratta%s: %s", f" per {label}" if label else "", error or "nessun fotogramma")
+    return None
 
 
 # ── Deduplicazione e conversione (facoltative) ──

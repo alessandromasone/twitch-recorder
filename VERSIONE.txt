@@ -1,3 +1,9 @@
+Versione preview 4 — correzione player e minimal a tabella
+
+- Player: mpegts.js riceveva un URL relativo dentro un worker, che non riesce a risolverlo («Failed to parse URL from /live/…», visto come «exception» e riconnessioni continue). Ora l'URL è assoluto e il worker è disattivato; i messaggi di errore indicano la causa (rete, server, decodifica).
+- Miniature dal flusso in REC: niente più 404. Se FFmpeg non estrae un fotogramma si riprova con la decodifica completa, poi si usa l'ultimo fotogramma buono, quindi la copertina ufficiale di Twitch; per le altre piattaforme risposta vuota. L'errore di FFmpeg finisce nel log.
+- Minimal ridisegnato come tabella compatta: colonne fisse (stato breve colorato, titolo o ultima live), comandi solo icona, nessuna etichetta piena, dirette separate dagli altri canali, «Aggiungi» a scomparsa, registrazioni su una riga.
+
 Versione preview 3 — copertine Twitch, player nuovo, minimal denso
 
 - Copertine dei canali Twitch dall'immagine ufficiale (thumbnail_url di Helix o CDN), anche durante la REC; il fotogramma del flusso registrato resta per il file in corso nella lista registrazioni e per Kick/YouTube.

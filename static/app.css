@@ -501,36 +501,71 @@ body:not(.selecting) .mon-check { display: none; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 
-/* ── Modalità minimal: una sola lista densa, solo testo ── */
-.live-tag {
-  display: inline-flex; gap: 4px; align-items: center; font-size: 11px; font-weight: 700; padding: 1px 6px;
-  border-radius: 3px; background: var(--tally-air); color: #fff; margin-right: 8px; flex: none;
-}
-.live-tag.rec { background: var(--tally-rec); }
-.row-status.live { display: flex; align-items: center; gap: 10px; }
-.row-status .live-tag { margin-right: 0; }
-.row-status .live-title { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
-.row-status.live > span:not(.live-tag):not(.live-title) { flex: none; }
-@media (max-width: 720px) {
-  .row-status .live-game { display: none; }
-  .bus-item { font-size: 12px; padding: 2px 8px; }
-}
-
-body.minimal .avatar, body.minimal .drawer-hero, body.minimal .rec-thumb, body.minimal .wall-section { display: none; }
-body.minimal .topbar { backdrop-filter: none; background: var(--desk); padding-top: 8px; padding-bottom: 8px; }
-body.minimal .layout { gap: 16px; padding-top: 12px; }
-body.minimal .section-title { margin: 12px 0 6px; }
-body.minimal .row { min-height: 40px; padding: 3px 8px 3px 12px; column-gap: 10px; font-size: 13px; }
-body.minimal .row.is-live { background: color-mix(in srgb, var(--tally-air) 6%, var(--panel)); }
-body.minimal .row-name { font-size: 13.5px; }
-body.minimal .tools .icon-btn { width: 28px; height: 28px; }
-body.minimal .rec { grid-template-columns: minmax(0, 1fr) auto; padding: 5px 8px 5px 14px; }
-body.minimal .rec-title { font-size: 12px; }
-body.minimal .rec-actions { flex-direction: row; }
-body.minimal .rec-day { padding-top: 8px; }
-body.minimal .mini-tally, body.minimal .rec-live {
-  display: inline-flex; gap: 4px; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 3px;
-  background: var(--tally-rec); color: #fff; flex: none;
-}
+.add-toggle { display: none; }
 .mini-tally, .rec-live { display: none; }
+
+/* ── Modalità minimal: una tabella compatta, solo testo ── */
+body.minimal .avatar, body.minimal .drawer-hero, body.minimal .rec-thumb, body.minimal .wall-section,
+body.minimal .row-quality { display: none; }
 body.minimal *, body.minimal *::before, body.minimal *::after { animation: none !important; transition: none !important; }
+body.minimal .topbar { backdrop-filter: none; background: var(--desk); padding-top: 8px; padding-bottom: 8px; }
+body.minimal .layout { gap: 16px; padding-top: 12px; grid-template-columns: minmax(0, 1fr) 420px; }
+body.minimal .toolbar { gap: 8px; }
+body.minimal .add-toggle { display: inline-flex; }
+body.minimal:not(.adding) .add { display: none; }
+body.minimal .chip { height: 26px; font-size: 12.5px; }
+body.minimal .col-main .section-title { display: none; }
+body.minimal .list-section { margin-top: 12px; }
+
+/* righe: [check] [punto] [nome] [stato 96px][informazione] [comandi] */
+body.minimal .row {
+  grid-template-columns: auto auto minmax(120px, 220px) minmax(0, 1fr) auto;
+  grid-template-areas: "check dot name status actions";
+  min-height: 38px; padding: 2px 6px 2px 12px; column-gap: 10px; font-size: 13px;
+}
+body.minimal .row-name { font-size: 13.5px; font-weight: 600; }
+body.minimal .row-status { display: flex; align-items: baseline; gap: 12px; color: var(--muted); }
+body.minimal .row.is-live + .row:not(.is-live) { border-top: 6px solid var(--desk); }
+body.minimal .row.is-live .row-name a { color: var(--text); }
+.m-state { flex: none; width: 92px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.m-state.m-rec { color: var(--tally-rec); }
+.m-state.m-air { color: var(--tally-air); }
+.m-state.m-cue { color: var(--tally-cue); }
+.m-state.m-err { color: var(--tally-rec); font-weight: 500; }
+.m-state.m-off { color: var(--faint); font-weight: 500; }
+.m-title { color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+.m-meta { flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.m-cue { flex: none; color: var(--tally-cue); font-weight: 600; }
+/* comandi solo icona, senza riempimenti */
+body.minimal .tools .icon-btn { width: 28px; height: 28px; }
+body.minimal .st { border-color: transparent; margin-right: 0; }
+body.minimal .st-rec { background: transparent; color: var(--tally-rec); }
+body.minimal .st-rec:hover { background: var(--panel-2); color: var(--tally-rec); }
+
+/* registrazioni su una riga: canale, titolo, ora e dimensione, azioni */
+body.minimal .rec { grid-template-columns: minmax(0, 1fr) auto; padding: 3px 6px 3px 14px; gap: 6px; }
+body.minimal .rec-info { display: grid; grid-template-columns: 104px minmax(0, 1fr) auto; gap: 10px; align-items: baseline; }
+body.minimal .rec-channel { font-size: 12.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.minimal .rec-channel .cue-badge { display: none; }
+body.minimal .rec-title { font-size: 12.5px; }
+body.minimal .rec-meta { font-size: 12px; }
+body.minimal .rec-meta span:nth-child(3) { display: none; }
+body.minimal .rec-actions { flex-direction: row; }
+body.minimal .rec-actions .icon-btn { width: 28px; height: 28px; }
+body.minimal .rec-day { padding: 10px 14px 2px; }
+body.minimal .rec-live { display: inline; color: var(--tally-rec); font-weight: 700; margin-right: 6px; font-size: 11px; }
+
+@media (max-width: 1100px) { body.minimal .layout { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 720px) {
+  body.minimal .row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "dot name actions" "dot status actions";
+    padding: 5px 4px 5px 12px; row-gap: 0;
+  }
+  body.selecting.minimal .row { grid-template-columns: auto auto minmax(0, 1fr) auto; grid-template-areas: "check dot name actions" "check dot status actions"; }
+  body.minimal .m-state { width: auto; }
+  body.minimal .row .m-title ~ .m-meta { display: none; }
+  body.minimal .rec-info { grid-template-columns: minmax(0, 1fr) auto; }
+  body.minimal .rec-title { display: none; }
+}
+@media (max-width: 720px) { .bus-item { font-size: 12px; padding: 2px 8px; } }
