@@ -88,7 +88,7 @@ Lo storico usato per i confronti è salvato in `channel_history.json` accanto a 
   - gli aggiornamenti ravvicinati sono uniti, fino a circa 2 al secondo.
 - **Scritture su disco:** `channels.json` viene scritto al massimo una volta ogni 2 secondi, invece che a ogni controllo.
 - **Preview:** un solo processo per canale, condiviso fra gli spettatori.
-- **Frontend:** niente Bootstrap, icone in sprite SVG, niente font web. `mpegts.js` viene caricato solo all'apertura del player. Gli asset statici hanno cache a lungo termine con versione nell'URL.
+- **Frontend:** niente Bootstrap, icone in sprite SVG, niente font web. `mpegts.js` è incluso nell'immagine Docker (scaricato durante la build, versione fissa) e viene caricato solo all'apertura del player. Gli asset statici hanno cache a lungo termine con versione nell'URL.
 
 ## Ambiente Preview (tag Docker `preview`)
 
@@ -127,6 +127,7 @@ Tutte le variabili sono opzionali.
 | `FILENAME_FORMAT` | `{name}_{timestamp}{ext}` | Pattern nome file |
 | `STREAM_QUALITY` | `best` | Qualità predefinita per i nuovi canali |
 | `MAX_FILE_SIZE` | `1932735283` | Dimensione massima prima dello split (~1,8 GB) |
+| `MIN_FREE_GB` | `2` | Sotto questo spazio libero non partono nuove registrazioni; quelle in corso continuano. `0` disattiva |
 | `PORT` | `5000` | Porta del server web |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `APP_PASSWORD` | _(vuota)_ | Password del pannello; vuota = nessun login |
@@ -245,7 +246,7 @@ static/             app.css, app.js (nessuna dipendenza)
 tests/              pytest con uno Streamlink finto
 ```
 
-Per i test: `pip install pytest flask python-dotenv && python -m pytest -q`.
+Per i test: `pip install pytest flask python-dotenv && python -m pytest -q`. Le GitHub Action eseguono gli stessi test prima di ogni build: se un test fallisce, l'immagine non viene pubblicata.
 
 ## Rilascio
 

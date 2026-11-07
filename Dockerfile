@@ -12,6 +12,10 @@ COPY app.py .
 COPY twrec/ twrec/
 COPY templates/ templates/
 COPY static/ static/
+# Lettore MPEG-TS servito dall'app stessa: il player non dipende da un CDN esterno.
+ARG MPEGTS_VERSION=1.7.3
+ADD https://cdn.jsdelivr.net/npm/mpegts.js@${MPEGTS_VERSION}/dist/mpegts.js static/vendor/mpegts.js
+RUN chmod 644 static/vendor/mpegts.js
 
 RUN mkdir -p /data/recordings
 

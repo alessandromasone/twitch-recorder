@@ -13,7 +13,7 @@ import time
 from . import preview, rerun, state, storage
 from .config import (
     AUTO_CONVERT, DEDUP_ENABLED, DELETE_AFTER_CONVERT, ERROR_CHECK_INTERVAL, HELIX_AVAILABLE,
-    HELIX_ENABLED, MINIMAL_UI, MONITOR_WORKERS, NOTIFY_TYPE, OFFLINE_CHECK_INTERVAL, OFFLINE_CONFIRM_INTERVAL,
+    HELIX_ENABLED, MIN_FREE_GB, MINIMAL_UI, MONITOR_WORKERS, NOTIFY_TYPE, OFFLINE_CHECK_INTERVAL, OFFLINE_CONFIRM_INTERVAL,
     OFFLINE_CONFIRMATIONS, ONLINE_CHECK_INTERVAL, PLATFORMS, QUALITY_OPTIONS, RECONNECT_TRIES,
     RECONNECT_WAIT, RECORDER_OFFLINE_GRACE_SECONDS, RERUN_DEFAULT_POLICY, RERUN_PROBABLE_SCORE,
     RERUN_SUSPECT_SCORE, SINGLE_LIVE_GRACE_SECONDS, SKIP_RERUNS, SKIP_TWITCH_ADS, STREAM_QUALITY,
@@ -128,7 +128,7 @@ def _config() -> dict:
         "helix_available": HELIX_AVAILABLE, "helix_checks": HELIX_ENABLED,
         "rerun_default_policy": RERUN_DEFAULT_POLICY, "rerun_suspect_score": RERUN_SUSPECT_SCORE,
         "rerun_probable_score": RERUN_PROBABLE_SCORE, "default_quality": STREAM_QUALITY,
-        "minimal_ui": MINIMAL_UI,
+        "minimal_ui": MINIMAL_UI, "min_free_gb": MIN_FREE_GB,
     }
 
 
@@ -158,6 +158,7 @@ def _stats(channels: list[dict], recordings: list[dict], now: float) -> dict:
         "monitor_inflight": len(inflight),
         "monitor_inflight_oldest": round(oldest) if inflight else 0,
         "monitor_workers": MONITOR_WORKERS,
+        "low_disk": not storage.has_free_space(),
     }
 
 

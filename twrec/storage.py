@@ -231,6 +231,15 @@ def disk_stats() -> dict:
     return value
 
 
+def has_free_space() -> bool:
+    """Falso quando lo spazio libero è sotto MIN_FREE_GB: le nuove REC non partono."""
+    from .config import MIN_FREE_GB
+    if MIN_FREE_GB <= 0:
+        return True
+    free = disk_stats().get("free", 0)
+    return not free or free >= MIN_FREE_GB * 1024 ** 3
+
+
 def delete_recording(filename: str) -> tuple[bool, str]:
     path = safe_recording_path(filename)
     if not path:

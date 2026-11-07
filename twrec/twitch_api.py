@@ -52,24 +52,39 @@ def _get_token(force: bool = False) -> str:
         return token
 
 
-def _get(path: str, params: list[tuple[str, str]]) -> dict:
-    url = f"https://api.twitch.tv/helix/{path}?{urllib.parse.urlencode(params)}"
+def request(method: str, path: str, params: list[tuple[str, str]] | None = None, body: dict | None = None) -> dict:
+    """Chiamata Helix autenticata con token app; rinnova il token una volta se scaduto."""
+    url = f"https://api.twitch.tv/helix/{path}"
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+    data = json.dumps(body).encode("utf-8") if body is not None else None
     for attempt in (0, 1):
         token = _get_token(force=attempt == 1)
-        req = urllib.request.Request(url, headers={
-            "Client-ID": TWITCH_CLIENT_ID, "Authorization": f"Bearer {token}",
-        })
+        headers = {"Client-ID": TWITCH_CLIENT_ID, "Authorization": f"Bearer {token}"}
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, method=method, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=10) as response:
-                body = json.loads(response.read().decode("utf-8"))
-            if not isinstance(body, dict) or not isinstance(body.get("data"), list):
-                raise HelixError("risposta Helix senza campo data valido")
-            return body
+                raw = response.read().decode("utf-8")
+            return json.loads(raw) if raw.strip() else {}
         except urllib.error.HTTPError as exc:
             if exc.code == 401 and attempt == 0:
                 continue  # token revocato o scaduto: rinnova e riprova una volta
-            raise HelixError(f"HTTP {exc.code} {exc.reason}") from exc
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", errors="replace")[:200]
+            except Exception:
+                pass
+            raise HelixError(f"HTTP {exc.code} {exc.reason} {detail}".strip()) from exc
     raise HelixError("autenticazione Helix non riuscita")
+
+
+def _get(path: str, params: list[tuple[str, str]]) -> dict:
+    body = request("GET", path, params)
+    if not isinstance(body, dict) or not isinstance(body.get("data"), list):
+        raise HelixError("risposta Helix senza campo data valido")
+    return body
 
 
 def get_streams(logins: list[str]) -> dict[str, dict]:

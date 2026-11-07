@@ -230,8 +230,8 @@
     const disk = S.disk;
     if (disk.total) {
       $("#diskFill").style.width = `${disk.used_pct}%`;
-      $("#diskText").textContent = `${disk.free_human} liberi`;
-      $("#disk").className = `disk ${disk.used_pct > 90 ? "crit" : disk.used_pct > 75 ? "warn" : ""}`;
+      $("#diskText").textContent = st.low_disk ? `${disk.free_human} liberi: nuove REC sospese` : `${disk.free_human} liberi`;
+      $("#disk").className = `disk ${st.low_disk || disk.used_pct > 90 ? "crit" : disk.used_pct > 75 ? "warn" : ""}`;
       $("#disk").title = `Usati ${disk.used_human} di ${disk.total_human} (${disk.used_pct}%) · registrazioni ${st.total_size_human || "—"}`;
     }
     $("#tabChCount").textContent = S.channels.size || "";
@@ -697,6 +697,7 @@
         <h3>Configurazione attiva</h3>
         <dl class="kv">
           <dt>Controlli Twitch</dt><dd>${c.helix_checks ? "API Helix, una richiesta ogni 100 canali" : "Streamlink, un processo per canale"}</dd>
+          <dt>Spazio minimo</dt><dd>${c.min_free_gb ? `${c.min_free_gb} GB liberi, sotto non partono nuove REC` : "nessun limite"}</dd>
           <dt>Intervalli</dt><dd>online ${c.online_check_interval}s, offline ${c.offline_check_interval}s, errori ${c.error_check_interval}s</dd>
           <dt>Conferme offline</dt><dd>${c.offline_confirmations} a ${c.offline_confirm_interval}s</dd>
           <dt>Riconnessioni</dt><dd>${c.reconnect_tries} tentativi ogni ${c.reconnect_wait}s</dd>
@@ -728,15 +729,21 @@
 
   // ── Player ──
   let mpegtsLoading = null;
+  // Prima la copia inclusa nell'immagine Docker, poi il CDN solo se manca (per esempio in sviluppo).
+  const MPEGTS_SOURCES = ["/static/vendor/mpegts.js", "https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.js"];
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = src; s.onload = resolve;
+      s.onerror = () => { s.remove(); reject(new Error(src)); };
+      document.head.appendChild(s);
+    });
+  }
   function loadMpegts() {
     if (window.mpegts) return Promise.resolve();
     if (!mpegtsLoading) {
-      mpegtsLoading = new Promise((resolve, reject) => {
-        const s = document.createElement("script");
-        s.src = "https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.js";
-        s.onload = resolve; s.onerror = () => { mpegtsLoading = null; reject(new Error("mpegts.js")); };
-        document.head.appendChild(s);
-      });
+      mpegtsLoading = MPEGTS_SOURCES.reduce((chain, src) => chain.catch(() => loadScript(src)), Promise.reject())
+        .catch((err) => { mpegtsLoading = null; throw err; });
     }
     return mpegtsLoading;
   }

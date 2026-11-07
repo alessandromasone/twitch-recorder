@@ -57,6 +57,14 @@ RERUN_SUSPECT_SCORE = max(10, min(95, _env_int("RERUN_SUSPECT_SCORE", 40)))
 RERUN_PROBABLE_SCORE = max(RERUN_SUSPECT_SCORE + 5, min(100, _env_int("RERUN_PROBABLE_SCORE", 70)))
 SKIP_TWITCH_ADS = _env_bool("SKIP_TWITCH_ADS", "true")
 
+# ── Spazio su disco ──
+# Sotto questa soglia di spazio libero (GB) non vengono avviate nuove registrazioni.
+# Quelle già in corso continuano. 0 disattiva il controllo.
+try:
+    MIN_FREE_GB = max(0.0, float(os.getenv("MIN_FREE_GB", "2")))
+except ValueError:
+    MIN_FREE_GB = 2.0
+
 # ── Elaborazione file ──
 AUTO_CONVERT = _env_bool("AUTO_CONVERT")
 DELETE_AFTER_CONVERT = _env_bool("DELETE_AFTER_CONVERT")

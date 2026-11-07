@@ -273,3 +273,14 @@ def test_helix_batch_parsing(monkeypatch):
     assert out["alpha"].online and out["alpha"].tagged_rerun and out["alpha"].via == "helix"
     assert out["alpha"].meta["viewers"] == 12
     assert out["c5"].certain and not out["c5"].online
+
+
+def test_low_disk_blocks_new_recordings(client, monkeypatch):
+    from twrec import storage
+    from twrec.monitor import apply_check_result
+    _api(client, action="add", channel="diskfull", platform="kick")
+    monkeypatch.setattr(storage, "has_free_space", lambda: False)
+    apply_check_result("diskfull", CheckResult(True, True, "live", meta={"title": "x"}))
+    assert not state.recorders["diskfull"].is_recording
+    assert "Spazio libero insufficiente" in state.find_channel("diskfull")["last_error"]
+    _api(client, action="remove", channel="diskfull")

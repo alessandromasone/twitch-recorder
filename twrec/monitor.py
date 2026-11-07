@@ -4,12 +4,12 @@ import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 
-from . import notify, preview, rerun, state, twitch_api
+from . import notify, preview, rerun, state, storage, twitch_api
 from .checks import CheckResult, check_streamlink, check_twitch_batch
 from .config import (
     ERROR_CHECK_INTERVAL, HELIX_AVAILABLE, HELIX_ENABLED, HELIX_OFFLINE_CHECK_INTERVAL, MONITOR_WORKERS, OFFLINE_CHECK_INTERVAL,
     OFFLINE_CONFIRM_INTERVAL, OFFLINE_CONFIRMATIONS, ONLINE_CHECK_INTERVAL,
-    RECORDER_OFFLINE_GRACE_SECONDS, SINGLE_LIVE_GRACE_SECONDS, STREAM_QUALITY, logger,
+    MIN_FREE_GB, RECORDER_OFFLINE_GRACE_SECONDS, SINGLE_LIVE_GRACE_SECONDS, STREAM_QUALITY, logger,
 )
 from .util import norm_platform
 
@@ -17,6 +17,7 @@ _pool = ThreadPoolExecutor(max_workers=MONITOR_WORKERS, thread_name_prefix="onli
 _batch_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="helix-batch")
 _helix_backoff_until = 0.0
 _HELIX_FAILED = object()
+_low_disk_warned: set[str] = set()
 
 
 # ── Modalità «Una volta» ──
@@ -243,6 +244,20 @@ def apply_check_result(name: str, res: CheckResult) -> None:
         to_stop.stop()
     if refresh_meta:
         refresh_meta.refresh_meta()
+    if to_start and not storage.has_free_space():
+        disk = storage.disk_stats()
+        msg = f"Spazio libero insufficiente ({disk['free_human']}, minimo {MIN_FREE_GB:g} GB): REC non avviata"
+        with state.lock:
+            current = state.find_channel(name)
+            if current is not None:
+                current["last_error"] = msg
+                state.mark_dirty()
+        if name not in _low_disk_warned:
+            _low_disk_warned.add(name)
+            logger.warning("💾 %s: %s", name, msg)
+        to_start = None
+    elif to_start:
+        _low_disk_warned.discard(name)
     if to_start:
         with state.lock:
             current = state.find_channel(name)

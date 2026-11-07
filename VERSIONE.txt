@@ -1,3 +1,9 @@
+Versione preview 6 — spazio minimo, test in CI, lettore incluso
+
+- MIN_FREE_GB (predefinito 2): sotto questa soglia di spazio libero non partono nuove registrazioni; quelle in corso continuano. Avviso nella barra in alto e nel canale.
+- I test girano nelle GitHub Action prima della build Docker, sia su preview sia su main.
+- mpegts.js viene scaricato durante la build Docker (versione fissa 1.7.3) e servito dall'app; il CDN resta solo come riserva fuori da Docker.
+
 Versione preview 5 — nascondi copertine
 
 - Pulsante occhio nella barra in alto e tasto h: coprono subito copertine, miniature delle registrazioni, avatar e video del player, e chiudono il picture-in-picture. Solo estetico (audio e REC continuano); lo stato resta dopo il ricaricamento ed è applicato prima del primo disegno, senza lampi di immagini.
