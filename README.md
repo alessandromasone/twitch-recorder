@@ -1,57 +1,30 @@
 # 📹 Twitch Recorder
 
-Applicazione web self-hosted per registrare automaticamente stream Twitch quando vanno online.
-
-Dashboard real-time con SSE, notifiche Telegram/Discord, qualità per canale con fallback automatico, smart retry, split automatico, import/export canali e API REST completa.
+Applicazione web self-hosted che registra automaticamente le dirette di Twitch, Kick e YouTube quando vanno online.
 
 ## Funzionalità
 
-- Layout adattivo: su schermi larghi Canali e Registrazioni sono affiancati, con scroll indipendente; su schermi più piccoli restano impilati.
-- Lista registrazioni stabile: le righe esistenti vengono aggiornate senza ricreare l'intera lista e l'ordine usa l'ora di inizio del file quando è presente nel nome, così i file REC non saltano mentre crescono.
-- **Lista canali stabile** — le schede vengono aggiornate in modo incrementale durante gli eventi SSE, conservando pulsanti, selettori qualità e focus.
-- **Ricerca e ordinamento** — filtra per nome o piattaforma e ordina per priorità, live prima, nome, ultima live o ultimo controllo.
-- **Filtri rapidi** — menu per visualizzare solo online, REC attive, canali non in pausa, in pausa, addormentati, privati, rerun escluse, offline confermati oppure canali da verificare.
-- **Esclusione rerun Twitch** — con `SKIP_RERUNS=true`, verifica il tag Twitch ufficiale e il prefisso esplicito del titolo tramite Helix; interrompe/salta la registrazione quando la rerun è confermata. Richiede `TWITCH_CLIENT_ID` e `TWITCH_CLIENT_SECRET`.
-- **Annunci Twitch** — Streamlink recente filtra automaticamente gli annunci incorporati; `SKIP_TWITCH_ADS` mantiene l'opzione esplicita solo per versioni legacy che la supportano. Non può rimuovere con certezza gli overlay pubblicitari della pagina web.
-- **Preview resiliente alle pubblicità** — il player tollera le pause di output di Streamlink durante gli annunci incorporati, corregge i gap dei timestamp audio e tenta la riconnessione dopo errori o stalli; la preview temporanea non crea file e chiude i processi quando chiudi il player.
-- **Login opzionale** — una password impostata con `APP_PASSWORD` protegge dashboard, API, stream live e file registrati; se la variabile è vuota il login è disattivato. Le sessioni hanno durata configurabile, token CSRF e limite ai tentativi errati; la chiave viene conservata nel volume dati se `SECRET_KEY` non è configurata.
-- **Cambio qualità sicuro** — se REC è attiva, il file corrente viene finalizzato e il registratore apre una nuova sessione con la qualità scelta; ogni nome file è riservato per evitare sovrascritture.
-- **Elaborazione file opzionale** — conversione TS→MP4 tramite FFmpeg `-c copy` e deduplicazione dei segmenti conclusi; entrambe disattivate per default, e il TS originale viene conservato anche quando la conversione MP4 è attiva, salvo scelta esplicita.
-
-- **Registrazione automatica** — monitora i canali con worker concorrenti limitati e avvia la registrazione quando vanno online; un singolo risultato negativo non basta a interromperla
-- **Timestamp registrazione normalizzati** — FFmpeg rimuxa il flusso in copia prima di scriverlo, quindi il tempo del file parte dall’inizio della registrazione e la preview REC condivide lo stesso TS normalizzato
-- **Monitor adattivo** — intervalli distinti per canali online, offline e controlli in errore; le verifiche manuali hanno priorità e lo stato intermedio di offline viene mostrato nella dashboard
-- **Last live e timestamp leggibili** — `last_live` mostra l’ultima rilevazione online in forma relativa, con data e ora complete al passaggio del mouse; i timestamp in `channels.json` e nell’export JSON/CSV sono ISO-8601 UTC, mantenendo `last_online` per compatibilità
-- **Diagnostica live** — mostra stato del monitor, richieste in corso, ultimo controllo, tentativi di riconnessione, errori, stato REC e modalità della preview
-- **Una volta** — pulsante con icona a orologio per avviare la registrazione temporanea; dopo la fine della live attende fino a 2 ore un eventuale ritorno online, azzera l'attesa se il canale riparte e mette automaticamente in pausa il canale se non torna live, disattivando il pulsante
-- **Dashboard live** — aggiornamenti in tempo reale via SSE (Server-Sent Events) senza refresh, con fallback a polling
-- **Qualità per canale** — qualità configurabile per canale (best, 1080p60, 720p, ecc.); il fallback privilegia prima la stessa altezza video con FPS alternativi, poi la risoluzione inferiore più vicina e infine una superiore se non ci sono alternative. Se la qualità usata differisce dalla richiesta, la scheda lo segnala.
-- **Notifiche** — Telegram (con screenshot live dal CDN Twitch), Discord webhook e webhook HTTP generico per eventi online, offline, inizio e fine registrazione
-- **Smart retry** — quando lo stream cade, tenta la riconnessione con tentativi e attesa configurabili prima di arrendersi
-- **Split automatico** — divide i file al raggiungimento della dimensione massima e riavvia la registrazione senza interruzioni
-- **Import/Export** — importa ed esporta la lista canali in JSON o CSV, direttamente dalla dashboard
-- **Stato e piattaforma a colpo d’occhio** — pallino verde/rosso per lo stato online/offline senza badge testuali duplicati; stati distinti per verifica/errore/sonno e sigla della piattaforma con colore dedicato (TW, KI, YT)
-- **Force check** — forza un controllo immediato per un singolo canale o tutti i canali
-- **Watchdog** — thread dedicato che monitora il monitor e lo riavvia se muore o si blocca
-- **Guarda live intelligente** — durante REC riusa lo stesso flusso tramite buffer circolare in memoria; se REC è ferma apre un flusso temporaneo, senza creare file, chiuso quando il player termina
-- **Multi-canale** — registra più canali contemporaneamente con thread pool
-- **Protezione file** — impedisce l'eliminazione di registrazioni in corso
-- **Docker ready** — immagine multi-arch (amd64 + arm64) con healthcheck e CI/CD automatizzato
-- **API REST** — API JSON completa per integrazioni esterne e automazione
+- **Registrazione automatica** con conferma della fine live su più controlli, riconnessione intelligente, split a dimensione massima e qualità per canale con fallback automatico (stessa risoluzione con FPS diversi, poi la più vicina inferiore, poi la superiore).
+- **Controlli leggeri.** Con le credenziali Twitch, tutti i canali Twitch si controllano con l'API Helix: una sola richiesta HTTP ogni 100 canali, invece di un processo Streamlink per canale. Kick e YouTube usano Streamlink.
+- **Rilevamento delle rerun, anche non dichiarate.** Ogni live riceve un punteggio da 0 a 100 basato su tag e titolo, titoli già trasmessi, VOD, spettatori e orario, con una politica per canale: registra e segna, salta, ignora. Vedi [Rerun](#rerun).
+- **Multiview "In onda".** I canali in diretta compaiono come monitor con miniatura, bordo *tally* (rosso in REC, verde in onda, ambra se è una rerun sospetta), titolo, categoria e spettatori. Gli altri canali sono righe compatte.
+- **Preview condivisa.** Una sola sorgente per canale, qualunque sia il numero di finestre aperte. Durante la REC la preview usa il flusso già scaricato; senza REC apre un flusso temporaneo che si chiude quando l'ultima finestra viene chiusa. Non crea mai file.
+- **Miniature senza costi.** Durante la REC il fotogramma viene preso dal flusso già in memoria; per Twitch fuori REC dal CDN pubblico; per i file conclusi viene generato una sola volta.
+- **Registrazioni con contesto:** raggruppate per giorno, con miniatura, durata, titolo e categoria della live e segnalazione rerun.
+- **Gestione:** pannello di dettaglio per ogni canale, selezione multipla (pausa, registra, dormi, qualità, politica rerun, rimozione), ricerca anche per titolo e gioco, filtri con contatori, modalità *Una volta*, modalità *A dormire* e import/export in JSON e CSV.
+- **Aggiornamenti in tempo reale** via SSE incrementale: dopo il primo stato completo arrivano solo i canali cambiati. Senza client collegati non viene calcolato nulla.
+- **Login opzionale** con CSRF, limite ai tentativi e sessione persistente.
+- **Notifiche** su Telegram (con screenshot e titolo), Discord e webhook generico.
+- **Docker** multi-arch (amd64 + arm64) con healthcheck.
 
 ## Avvio rapido
 
-### Docker
-
 ```bash
-docker run -d \
-  --name twitch-recorder \
-  -p 5000:5000 \
-  -v twitch-data:/data \
+docker run -d --name twitch-recorder -p 5000:5000 -v twitch-data:/data \
   ghcr.io/alessandromasone/twitch-recorder:latest
 ```
 
-### Docker Compose
+Oppure con Docker Compose:
 
 ```bash
 git clone https://github.com/alessandromasone/twitch-recorder.git
@@ -60,171 +33,216 @@ cp .env.example .env    # personalizza le variabili
 docker compose up -d
 ```
 
-Apri [http://localhost:5000](http://localhost:5000) nel browser.
+Apri [http://localhost:5000](http://localhost:5000).
 
-Per abilitare l'accesso con password, imposta `APP_PASSWORD` nel file `.env`. È consigliato configurare anche una `SECRET_KEY` lunga e casuale, ad esempio generata con `python -c "import secrets; print(secrets.token_hex(32))"`; se è vuota, l'app salva una chiave persistente nel volume dati. Se `APP_PASSWORD` è vuota o assente, l'app resta accessibile senza login. `APP_SESSION_HOURS` regola la durata della sessione (default 12). Imposta `SESSION_COOKIE_SECURE=true` solo quando l'app è raggiunta tramite HTTPS; con HTTP in locale lascialo su `false`.
+**Consigliato:** crea un'app nel [portale sviluppatori Twitch](https://dev.twitch.tv/console/apps) (va bene un URL di redirect qualsiasi, per esempio `http://localhost`) e inserisci `TWITCH_CLIENT_ID` e `TWITCH_CLIENT_SECRET` nel `.env`. Così ottieni:
+- controlli molto più leggeri;
+- titolo, categoria, spettatori e avatar;
+- il rilevamento rerun completo.
 
-Per saltare le rerun di Twitch, imposta `SKIP_RERUNS=true` e configura `TWITCH_CLIENT_ID` e `TWITCH_CLIENT_SECRET` di un'app registrata nel [portale sviluppatori Twitch](https://dev.twitch.tv/console/apps). Il monitor usa l'API Helix e considera rerun il tag ufficiale `Rerun` o un titolo che inizi esplicitamente con `Rerun`/`[Rerun]`. Se l'API non è raggiungibile, lo stato viene trattato come incerto: non si avvia una nuova registrazione finché non è possibile verificarlo. Il riconoscimento è specifico per Twitch, perché le altre piattaforme non espongono uno stato rerun uniforme tramite l'integrazione attuale.
+Per proteggere il pannello imposta `APP_PASSWORD` e una `SECRET_KEY` lunga, per esempio generata con `python -c "import secrets; print(secrets.token_hex(32))"`. Metti `SESSION_COOKIE_SECURE=true` solo dietro HTTPS.
 
-`SKIP_TWITCH_ADS=true` conserva il comportamento di filtro esplicito sulle vecchie versioni Streamlink che supportano `--twitch-disable-ads`. Con Streamlink 7.5 o successivo gli annunci incorporati vengono già filtrati automaticamente; durante il filtro, l’output può interrompersi temporaneamente. La preview ora attende fino a `PREVIEW_IDLE_TIMEOUT_SECONDS` e tenta la riconnessione in caso di errore del player. Questa opzione non garantisce la rimozione di eventuali overlay pubblicitari disegnati nella pagina web.
+## Rerun
+
+Twitch segnala una rerun solo con il tag ufficiale, che molti non usano. Il recorder valuta quindi ogni live con segnali indipendenti, tutti leggeri (nessuna analisi audio o video):
+
+| Segnale | Punti |
+|---|---|
+| Tag ufficiale *Rerun*, tipo stream o titolo che inizia con "Rerun" | rerun confermata |
+| Parole come *replica*, *rerun*, *rewatch*, *differita*, *registrata* nel titolo | +45 (+20 per *vod*, *highlights*, *best of*) |
+| Titolo identico a una live o a una VOD di almeno 3 ore prima | +45 (quasi identico, ≥ 92%: +30) |
+| Stessa categoria della live corrispondente | +10 |
+| Spettatori sotto il 25% della mediana del canale (dopo 15 minuti, solo con Helix) | +20 (sotto il 40%: +10) |
+| Orario d'inizio mai visto nello storico del canale (almeno 8 live) | +15 |
+
+Da 40 punti la live è una **possibile** rerun, da 70 una **probabile** (soglie modificabili con `RERUN_SUSPECT_SCORE` e `RERUN_PROBABLE_SCORE`).
+
+Per evitare falsi positivi:
+- i titoli "fissi", che il canale riusa in almeno 3 live o nel 30% delle live, non contano;
+- una live ripartita dopo un crash, cioè entro 3 ore dalla precedente, non conta come copia.
+
+Dal pannello del canale puoi indicare **È una rerun** o **Non è una rerun**. La seconda scelta mette quel titolo fra quelli da ignorare per il canale.
+
+La politica si sceglie per canale, con il valore predefinito impostato da `RERUN_DEFAULT_POLICY`:
+
+- `mark` (predefinito): registra comunque e segna il file e la scheda. Non perdi mai una live.
+- `skip`: non registra le rerun confermate né quelle probabili. Se una REC è già in corso, viene fermata.
+- `record`: ignora i sospetti.
+
+Con `SKIP_RERUNS=true` le rerun **dichiarate** vengono sempre saltate, come nelle versioni precedenti.
+
+Lo storico usato per i confronti è salvato in `channel_history.json` accanto a `channels.json`. Il rilevamento migliora man mano che il recorder osserva le live di un canale. Per un canale appena aggiunto, con Helix, i confronti usano anche le ultime 30 VOD.
+
+## Leggerezza
+
+- **Controlli:** con Helix, una richiesta HTTP ogni 100 canali al posto di un processo Python/Streamlink per canale a ogni controllo.
+- **Avvio REC:** la qualità viene risolta direttamente da Streamlink con una lista di fallback (`720p60,720p,…,best`), senza una chiamata `--json` preliminare. La qualità effettivamente aperta si legge dal log.
+- **SSE:**
+  - viaggiano solo le differenze;
+  - la lista registrazioni viene ripassata solo quando cambia, oppure ogni 30 secondi;
+  - lo spazio su disco viene ricalcolato al massimo ogni 10 secondi;
+  - gli aggiornamenti ravvicinati sono uniti, fino a circa 2 al secondo.
+- **Scritture su disco:** `channels.json` viene scritto al massimo una volta ogni 2 secondi, invece che a ogni controllo.
+- **Preview:** un solo processo per canale, condiviso fra gli spettatori.
+- **Frontend:** niente Bootstrap, icone in sprite SVG, niente font web. `mpegts.js` viene caricato solo all'apertura del player. Gli asset statici hanno cache a lungo termine con versione nell'URL.
 
 ## Ambiente Preview (tag Docker `preview`)
 
-Il branch `preview` usa un workflow GitHub Actions separato (`.github/workflows/docker-preview.yml`) che pubblica su GHCR:
+Il branch `preview` usa un workflow separato (`.github/workflows/docker-preview.yml`) che pubblica:
 
 - `ghcr.io/alessandromasone/twitch-recorder:preview`
-- `ghcr.io/alessandromasone/twitch-recorder:preview-<commit>` per identificare una build precisa
+- `ghcr.io/alessandromasone/twitch-recorder:preview-<commit>`
 
-Questo workflow **non pubblica né aggiorna il tag `latest`**. Il workflow di produzione continua a essere gestito separatamente dal branch `main` e dai tag di release.
-
-Per avviare la preview sullo stesso host della versione stabile, dopo che la GitHub Action ha pubblicato l'immagine:
+Il tag `latest` non viene mai toccato. Per avviare la preview accanto alla versione stabile:
 
 ```bash
 docker compose -f docker-compose.preview.yml pull
 docker compose -f docker-compose.preview.yml up -d
 ```
 
-La preview è raggiungibile su `http://localhost:5001` per default. Puoi cambiare la porta host impostando `PREVIEW_PORT` (ad esempio in `.env`). Usa `docker compose -f docker-compose.preview.yml logs -f` per i log e `docker compose -f docker-compose.preview.yml down` per fermarla.
+La preview risponde su `http://localhost:5001` (cambiabile con `PREVIEW_PORT`). Ha un container e un volume propri (`twitch-recorder-preview-data`), quindi non condivide canali o registrazioni con `latest`. Per un pacchetto GHCR privato esegui prima `docker login ghcr.io`.
 
-La preview ha un container e un volume separati (`twitch-recorder-preview-data`), quindi non condivide i canali o le registrazioni con l'istanza `latest`. Prima di usarla, verifica che il pacchetto GHCR sia accessibile dal server; per un pacchetto privato, esegui `docker login ghcr.io`.
-
-Per pubblicare una nuova preview, invia le modifiche al branch `preview`:
+Per pubblicare una nuova preview basta un push sul branch `preview`:
 
 ```bash
-# Primo utilizzo, se il branch non esiste ancora in locale
-git switch -c preview
-git push -u origin preview
-
-# Per gli aggiornamenti successivi
 git switch preview
-git push origin preview
+git push -u origin preview
 ```
-
-La pubblicazione viene eseguita automaticamente; i pull request diretti al branch `preview` vengono compilati per verificarne la build ma non pubblicano immagini.
 
 ## Configurazione
 
-Tutte le variabili sono opzionali e hanno un valore di default. Si configurano tramite file `.env` o variabili d'ambiente.
+Tutte le variabili sono opzionali.
 
 ### Generali
 
 | Variabile | Default | Descrizione |
 |---|---|---|
-| `CHANNELS_FILE` | `channels.json` | File di salvataggio canali |
+| `CHANNELS_FILE` | `channels.json` | File dei canali (gli altri file di stato vengono salvati accanto) |
 | `RECORDINGS_DIR` | `recordings` | Cartella registrazioni |
 | `FILE_EXTENSION` | `.ts` | Estensione file video |
 | `FILENAME_FORMAT` | `{name}_{timestamp}{ext}` | Pattern nome file |
-| `STREAM_QUALITY` | `best` | Qualità default per nuovi canali |
-| `SKIP_RERUNS` | `false` | Esclude le rerun Twitch riconosciute; richiede `TWITCH_CLIENT_ID` e `TWITCH_CLIENT_SECRET` |
-| `TWITCH_CLIENT_ID` | _(vuota)_ | Client ID di un'app Twitch, necessario per leggere i tag live via Helix quando `SKIP_RERUNS=true` |
-| `TWITCH_CLIENT_SECRET` | _(vuota)_ | Secret della stessa app Twitch; mantenerlo segreto e non inserirlo nel repository |
-| `SKIP_TWITCH_ADS` | `true` | Su Streamlink legacy abilita il filtro esplicito degli annunci Twitch; Streamlink ≥ 7.5 filtra gli annunci incorporati automaticamente |
-| `CHECK_INTERVAL` | `60` | Intervallo generale di riferimento tra i controlli |
-| `MONITOR_WORKERS` | `2` | Numero massimo di controlli simultanei (1–8) |
-| `ONLINE_CHECK_INTERVAL` | `30` | Secondi tra controlli per canali online |
-| `OFFLINE_CHECK_INTERVAL` | `60` | Secondi tra controlli per canali offline confermati |
-| `ERROR_CHECK_INTERVAL` | `120` | Backoff per controlli falliti o incerti |
-| `OFFLINE_CONFIRMATIONS` | `3` | Risposte offline certe da raccogliere prima di confermare la fine live (2–5) |
-| `OFFLINE_CONFIRM_INTERVAL` | `5` | Secondi tra le verifiche di conferma offline |
-| `RECORDER_OFFLINE_GRACE_SECONDS` | `15` | Attesa aggiuntiva dopo offline confermato prima di fermare REC |
-| `LIVE_STREAM_BUFFER_BYTES` | `4194304` | Dimensione del buffer RAM che il player condivide con REC (4 MiB) |
-| `PREVIEW_STARTUP_TIMEOUT_SECONDS` | `120` | Secondi concessi alla preview per ricevere i primi dati (anche durante un pre-roll) |
-| `PREVIEW_IDLE_TIMEOUT_SECONDS` | `180` | Secondi senza output tollerati durante una live (ad esempio durante una pubblicità incorporata) prima di chiudere la connessione e lasciare al browser la riconnessione |
-| `MAX_FILE_SIZE` | `1932735283` | Dimensione massima file prima dello split (~1.8 GB) |
+| `STREAM_QUALITY` | `best` | Qualità predefinita per i nuovi canali |
+| `MAX_FILE_SIZE` | `1932735283` | Dimensione massima prima dello split (~1,8 GB) |
 | `PORT` | `5000` | Porta del server web |
-| `LOG_LEVEL` | `INFO` | Livello di log (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-| `APP_PASSWORD` | _(vuota)_ | Password di accesso al pannello; vuota per non richiedere il login |
-| `SECRET_KEY` | generata all'avvio | Chiave di firma delle sessioni; impostala in `.env` per mantenere valide le sessioni tra riavvii |
-| `SESSION_COOKIE_SECURE` | `false` | Marca il cookie di sessione come Secure; abilitalo solo dietro HTTPS |
-| `APP_SESSION_HOURS` | `12` | Durata sessione autenticata in ore (1–720) |
-| `AUTO_CONVERT` | `false` | Remuxa i file `.ts` completati in `.mp4` senza ricodifica |
-| `DELETE_AFTER_CONVERT` | `false` | Elimina l'originale `.ts` solo se la conversione MP4 è riuscita |
-| `DEDUP_ENABLED` | `false` | Deduplica registrazioni concluse usando fingerprint di dimensione e campioni del file |
-| `DEDUP_BYTES` | `2097152` | Dimensione del campione usato dalla deduplicazione (almeno 64 KiB) |
-| `DEDUP_FILE` | `/data/dedup_hashes.json` nel container | Percorso indice deduplicazione; se vuoto viene collocato accanto a `CHANNELS_FILE` |
+| `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `APP_PASSWORD` | _(vuota)_ | Password del pannello; vuota = nessun login |
+| `SECRET_KEY` | generata e salvata | Chiave di firma delle sessioni |
+| `SESSION_COOKIE_SECURE` | `false` | Cookie Secure (solo con HTTPS) |
+| `APP_SESSION_HOURS` | `12` | Durata della sessione (1–720 ore) |
 
-### Resilienza
+### Twitch e rerun
 
 | Variabile | Default | Descrizione |
 |---|---|---|
-| `RECONNECT_WAIT` | `30` | Secondi di attesa tra un tentativo di riconnessione e l'altro |
-| `RECONNECT_TRIES` | `3` | Numero massimo di tentativi prima di dichiarare lo stream terminato |
-| `JITTER_MAX` | `10` | Jitter casuale in secondi aggiunto tra i cicli di monitoraggio |
-| `CHECK_PAUSED_ROOMS` | legacy | Non più necessario: ogni canale non dormiente viene controllato anche quando la registrazione è in pausa. La modalità luna sospende i controlli di quel canale. |
+| `TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET` | _(vuote)_ | Credenziali di un'app Twitch per l'API Helix |
+| `TWITCH_CHECK_METHOD` | `auto` | `auto` (Helix se ci sono le credenziali), `helix` o `streamlink` |
+| `HELIX_OFFLINE_CHECK_INTERVAL` | `20` | Secondi tra i controlli dei canali Twitch offline quando si usa Helix |
+| `SKIP_RERUNS` | `false` | Salta sempre le rerun dichiarate |
+| `RERUN_DEFAULT_POLICY` | `mark` | `mark`, `skip` o `record`; modificabile per canale |
+| `RERUN_SUSPECT_SCORE` | `40` | Punteggio da cui una live è "possibile rerun" |
+| `RERUN_PROBABLE_SCORE` | `70` | Punteggio da cui una live è "probabile rerun" |
+| `SKIP_TWITCH_ADS` | `true` | Passa `--twitch-disable-ads` solo alle vecchie versioni di Streamlink che lo supportano |
+
+Helix aggiorna lo stato delle live con qualche decina di secondi di ritardo rispetto a Streamlink. Se per te conta registrare dal primissimo secondo, imposta `TWITCH_CHECK_METHOD=streamlink`: perdi la leggerezza dei controlli in blocco, ma resti con i metadati via Streamlink e il rilevamento rerun basato sul titolo.
+
+### Monitor e preview
+
+| Variabile | Default | Descrizione |
+|---|---|---|
+| `MONITOR_WORKERS` | `2` | Controlli Streamlink simultanei (1–8) |
+| `ONLINE_CHECK_INTERVAL` | `30` | Secondi tra i controlli dei canali online |
+| `OFFLINE_CHECK_INTERVAL` | `60` | Secondi tra i controlli dei canali offline |
+| `ERROR_CHECK_INTERVAL` | `120` | Attesa dopo un controllo fallito |
+| `OFFLINE_CONFIRMATIONS` | `3` | Esiti offline necessari per confermare la fine della live (2–5) |
+| `OFFLINE_CONFIRM_INTERVAL` | `5` | Secondi tra le verifiche di conferma |
+| `RECORDER_OFFLINE_GRACE_SECONDS` | `15` | Attesa extra prima di fermare la REC |
+| `RECONNECT_WAIT` / `RECONNECT_TRIES` | `30` / `3` | Riconnessione quando il flusso cade |
+| `LIVE_STREAM_BUFFER_BYTES` | `4194304` | Buffer RAM condiviso fra REC e preview |
+| `PREVIEW_STARTUP_TIMEOUT_SECONDS` | `120` | Attesa massima dei primi dati della preview |
+| `PREVIEW_IDLE_TIMEOUT_SECONDS` | `180` | Pausa di output tollerata (per esempio durante le pubblicità) |
+| `PREVIEW_LINGER_SECONDS` | `10` | La sorgente temporanea resta aperta per questi secondi dopo l'ultimo spettatore |
+
+### File
+
+| Variabile | Default | Descrizione |
+|---|---|---|
+| `AUTO_CONVERT` | `false` | Remux TS→MP4 senza ricodifica a fine file |
+| `DELETE_AFTER_CONVERT` | `false` | Elimina il TS solo dopo una conversione riuscita |
+| `DEDUP_ENABLED` | `false` | Elimina i file conclusi identici a uno già registrato |
+| `DEDUP_BYTES` / `DEDUP_FILE` | `2097152` / accanto a `CHANNELS_FILE` | Campione e indice della deduplicazione |
+| `RECORDING_THUMBS` | `true` | Miniature dei file conclusi, in `recordings/.thumbs` |
+
+I segmenti più piccoli di 4 KB, per esempio quando una live non parte, vengono eliminati automaticamente.
 
 ### Notifiche
 
 | Variabile | Default | Descrizione |
 |---|---|---|
-| `NOTIFY_TYPE` | _(vuoto)_ | Tipo di notifica: `discord`, `telegram`, `webhook` o vuoto per disattivare |
-| `NOTIFY_EVENTS` | `online,offline,rec_start,rec_end` | Eventi da notificare (separati da virgola) |
-| `NOTIFY_URL` | | URL del webhook Discord o generico |
-| `TELEGRAM_BOT_TOKEN` | | Token del bot Telegram |
-| `TELEGRAM_CHAT_ID` | | Chat ID Telegram |
-| `TELEGRAM_NOTIFY_PHOTO` | `true` | Invia screenshot della live nella notifica online (solo Telegram) |
-
-#### Formato notifiche Telegram
-
-**Online** — foto con screenshot della live + nome canale cliccabile + 🟢 Online
-
-**Offline** — messaggio testuale con nome canale cliccabile + 🔴 Offline
-
-**rec_start / rec_end** — messaggio testuale con nome canale cliccabile e dettaglio
+| `NOTIFY_TYPE` | _(vuoto)_ | `discord`, `telegram`, `webhook` o vuoto |
+| `NOTIFY_EVENTS` | `online,offline,rec_start,rec_end` | Eventi da notificare |
+| `NOTIFY_URL` | | Webhook Discord o generico |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | | Bot e chat Telegram |
+| `TELEGRAM_NOTIFY_PHOTO` | `true` | Screenshot della live nella notifica online (Twitch) |
 
 ## API
 
-Tutti gli endpoint restituiscono JSON.
-
 | Endpoint | Metodo | Descrizione |
 |---|---|---|
-| `/api/status` | GET | Stato completo: canali, registrazioni, disco, config, statistiche |
-| `/api/stream` | GET | SSE — stream di eventi per aggiornamenti live in tempo reale |
+| `/api/status` | GET | Stato completo: canali, registrazioni, disco, configurazione, statistiche |
+| `/api/stream` | GET | SSE: evento `status` (completo) e poi `delta` (solo differenze) |
 | `/api/room` | POST | Azioni sui canali (vedi sotto) |
-| `/api/check` | POST | Forza un check immediato (`{"channel":"nome"}` o `{}` per tutti) |
-| `/api/export` | GET | Esporta canali in JSON (default) o CSV (`?format=csv`) |
-| `/api/import` | POST | Importa canali da file JSON o CSV (multipart o body) |
+| `/api/check` | POST | Controllo immediato (`{"channel":"nome"}` o `{}` per tutti) |
+| `/api/export` | GET | Canali in JSON o CSV (`?format=csv`) |
+| `/api/import` | POST | Importa JSON o CSV; `update_existing_quality=true` aggiorna la qualità dei canali esistenti |
+| `/api/delete_recording` | POST | `{"filename":"..."}` oppure `{"filenames":[...]}` |
+| `/live/<platform>/<room>` | GET | Flusso MPEG-TS della preview |
+| `/thumb/live/<room>.jpg` | GET | Fotogramma recente dal flusso già acquisito |
+| `/thumb/rec/<file>.jpg` | GET | Miniatura di una registrazione conclusa |
+| `/recordings/<file>` | GET | Download o streaming (supporta Range; `?dl=1` per forzare il download) |
+| `/health` | GET | Healthcheck del monitor |
 
-Nel modale di importazione è disponibile **Aggiorna la qualità dei canali già presenti**. Se selezionato, aggiorna solo `quality` dei canali duplicati; se una REC è attiva, finalizza il file corrente e avvia la nuova qualità in un file distinto. Senza la casella selezionata, i duplicati sono saltati come prima. Le liste testuali senza un campo qualità non modificano le qualità esistenti.
+Azioni di `/api/room`. Il corpo JSON contiene `action`, più `channel` e i parametri dell'azione.
 
-| `/api/delete_recording` | POST | Elimina una registrazione (`{"filename":"..."}`) |
-| `/live/<platform>/<room>` | GET | Flusso live diretto temporaneo per il player; non crea file e viene chiuso quando il player termina |
-| `/health` | GET | Healthcheck con stato monitor, controlli in corso e tempi dell'ultimo risultato |
+| Azione | Parametri | Descrizione |
+|---|---|---|
+| `add` | `channel`, `platform`, `quality` | Aggiunge un canale (si può incollare il link) |
+| `remove` | `channel` | Rimuove il canale; le registrazioni restano |
+| `pause` / `resume` | `channel` | Pausa o ripresa della registrazione; il monitor continua |
+| `toggle_sleep` | `channel` | A dormire: ferma la REC e sospende i controlli |
+| `toggle_single_live` | `channel` | Una volta: registra la prossima live, poi pausa dopo 2 ore offline |
+| `set_quality` | `channel`, `quality` | Durante la REC chiude il file e ne apre uno nuovo |
+| `set_rerun_policy` | `channel`, `policy` | `mark`, `skip`, `record` o `null` (predefinita) |
+| `rerun_override` | `channel`, `verdict` | `rerun`, `original` o `null` per la live corrente |
+| `bulk` | `channels`, `op`, `value` | `op`: `pause`, `resume`, `sleep`, `wake`, `check`, `quality`, `rerun_policy`, `remove` |
+| `pause_all` / `resume_all` | | Su tutti i canali |
 
-### Azioni su `/api/room`
+## Struttura del codice
 
-La pausa normale ferma la registrazione ma mantiene attivo il monitor. L’azione `toggle_sleep` con l’icona a luna ferma la registrazione e sospende i controlli; al risveglio il monitor riparte senza avviare REC. Lo stato `sleeping` è persistito in `channels.json` ed è incluso nell’esportazione JSON/CSV.
+```
+app.py              punto d'ingresso (gunicorn app:app)
+twrec/config.py     variabili d'ambiente
+twrec/state.py      stato condiviso e salvataggio di channels.json
+twrec/checks.py     controlli online (Helix in blocco, Streamlink)
+twrec/monitor.py    scheduler, conferma offline, avvio/stop REC
+twrec/recorder.py   Streamlink → FFmpeg → file + buffer
+twrec/preview.py    preview condivisa e miniature live
+twrec/rerun.py      punteggio rerun e storico
+twrec/storage.py    indice registrazioni, metadati, miniature, dedup, MP4
+twrec/status.py     stato JSON e SSE incrementale
+twrec/actions.py    operazioni sui canali
+twrec/web.py        Flask: login, pagine, API
+static/             app.css, app.js (nessuna dipendenza)
+tests/              pytest con uno Streamlink finto
+```
 
-Tutte le azioni accettano un JSON con `action` e opzionalmente `channel` e `quality`.
+Per i test: `pip install pytest flask python-dotenv && python -m pytest -q`.
 
-| Azione | Descrizione |
-|---|---|
-| `add` | Aggiunge un canale (`channel` obbligatorio, `quality` opzionale) |
-| `remove` | Rimuove un canale e ferma la registrazione |
-| `pause` | Mette in pausa un canale |
-| `resume` | Riprende un canale in pausa e disattiva la modalità Una volta |
-| `toggle_single_live` | Attiva/disattiva la modalità Una volta; la pausa automatica scatta dopo 2 ore offline confermate |
-| `toggle_sleep` | Alterna A dormire: sospende i controlli; al risveglio riattiva il monitor senza avviare REC |
-| `set_quality` | Cambia la qualità; se REC è attiva finalizza il file corrente e avvia una nuova sessione con un file distinto |
-| `pause_all` | Mette in pausa tutti i canali |
-| `resume_all` | Riprende tutti i canali |
-
-## Architettura
-
-- **Monitor** — scheduler con massimo `MONITOR_WORKERS` richieste in volo; pianifica ogni canale in modo indipendente, assegna priorità ai controlli manuali, e usa cadenze separate per live, offline ed errori
-- **Conferma offline** — richiede `OFFLINE_CONFIRMATIONS` esiti offline certi; gli errori non vengono conteggiati e una finestra aggiuntiva protegge la registrazione da interruzioni brevi
-- **Recorder** — un thread per canale che legge un unico flusso Streamlink e lo scrive contemporaneamente sul file e su un buffer circolare RAM per il player; gestisce split e riconnessione
-- **Preview** — durante REC ascolta il buffer condiviso senza aprire una seconda sorgente; senza REC crea un flusso temporaneo indipendente e chiude i processi alla fine del player
-- **Watchdog** — controlla il thread monitor e segnala richieste bloccate; `/health` restituisce lo stato del monitor e delle verifiche in corso
-- **SSE** — broadcast asincrono dello stato a tutti i client connessi dopo ogni check e ogni azione
-
-## Rilascio nuova versione
+## Rilascio
 
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
-
-La GitHub Action builda e pusha automaticamente l'immagine Docker multi-arch su GHCR.
 
 ## Licenza
 

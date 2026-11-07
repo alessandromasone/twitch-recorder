@@ -20,3 +20,5 @@ README.md
 LICENSE
 docker-compose.yml
 docker-compose.override.yml
+tests/
+.pytest_cache/

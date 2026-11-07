@@ -1,1105 +1,180 @@
 <!doctype html>
-<html lang="it" data-bs-theme="dark">
+<html lang="it">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token_value }}">
+  <meta name="color-scheme" content="dark light">
   <title>Twitch Recorder</title>
-  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg', v='1') }}">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.js"></script>
-  <style>
-    :root {
-      --tw: #9146ff; --tw-dim: #7c3aed; --tw-glow: rgba(145,70,255,.15);
-      --rec: #ef4444; --online: #22c55e;
-      --surface: #18181b; --surface2: #1f1f23; --surface3: #26262c;
-      --border: #2d2d35; --text1: #efeff1; --text2: #adadb8; --text3: #636370;
-    }
-    [data-bs-theme="light"] {
-      --surface: #ffffff; --surface2: #f7f7f8; --surface3: #efefef;
-      --border: #e0e0e4; --text1: #0e0e10; --text2: #53535f; --text3: #adadb8;
-      --tw-glow: rgba(145,70,255,.08);
-    }
-    * { box-sizing: border-box; }
-    body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--surface); color: var(--text1); margin: 0; }
-    .shell { max-width: 1100px; margin: 0 auto; padding: 16px; }
-    .workspace-grid { display: block; }
-
-    .hdr { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
-    .hdr-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.2rem; }
-    .hdr-brand i { color: var(--tw); font-size: 1.4rem; }
-    .hdr-right { display: flex; align-items: center; gap: 12px; }
-    .hdr-meta { font-size: .75rem; color: var(--text3); display: flex; align-items: center; gap: 4px; }
-
-    .sse-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--online); animation: pulse 2s ease infinite; transition: background .3s; }
-    .sse-dot.disconnected { background: var(--rec); animation: none; }
-    .sse-dot.connecting { background: #fbbf24; }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
-
-    .config-tags { display: flex; gap: 4px; flex-wrap: wrap; }
-    .config-tag { font-size: .6rem; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: var(--surface3); color: var(--text3); text-transform: uppercase; letter-spacing: .04em; }
-    .config-tag.on { background: var(--tw-glow); color: var(--tw); }
-    .config-tag.clickable { cursor: pointer; transition: all .15s; }
-    .config-tag.clickable:hover { border-color: var(--tw); }
-
-    .icon-btn { background: var(--surface3); border: 1px solid var(--border); border-radius: 8px; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; color: var(--text2); cursor: pointer; transition: all .15s; }
-    .icon-btn:hover { border-color: var(--tw); color: var(--tw); }
-
-    .stats-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 12px; }
-    .stat-pill { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; display: flex; align-items: center; gap: 10px; transition: border-color .2s; }
-    .stat-pill:hover { border-color: var(--tw); }
-    .stat-icon { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1rem; flex-shrink: 0; }
-    .stat-val { font-size: 1.25rem; font-weight: 700; line-height: 1; }
-    .stat-lbl { font-size: .68rem; color: var(--text3); text-transform: uppercase; letter-spacing: .05em; }
-
-    .disk-strip { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 8px 14px; margin-bottom: 12px; }
-    .disk-bar { height: 6px; border-radius: 3px; background: var(--surface3); overflow: hidden; }
-    .disk-fill { height: 100%; border-radius: 3px; transition: width .6s ease; background: var(--tw); }
-
-    .add-bar { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; }
-    .add-bar form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .add-bar input[type="text"] { flex: 1; min-width: 180px; background: var(--surface3); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text1); font-size: .88rem; font-family: inherit; outline: none; transition: border-color .2s; }
-    .add-bar input[type="text"]:focus { border-color: var(--tw); }
-    .add-bar input::placeholder { color: var(--text3); }
-    .add-bar select, .ch-quality-select { background: var(--surface3); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text1); font-family: inherit; font-size: .82rem; outline: none; }
-    .ch-quality-select { border-radius: 5px; padding: 2px 6px; color: var(--text2); font-family: 'JetBrains Mono', monospace; font-size: .7rem; }
-    .btn-tw { background: var(--tw); color: #fff; border: none; border-radius: 8px; padding: 8px 16px; font-weight: 600; font-family: inherit; font-size: .85rem; cursor: pointer; white-space: nowrap; transition: background .2s, transform .1s; }
-    .btn-tw:hover { background: var(--tw-dim); }
-    .btn-tw:active { transform: scale(.97); }
-
-    .panel { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 16px; }
-    .panel-hdr { padding: 10px 14px; font-weight: 600; font-size: .85rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .panel-hdr-left { display: flex; align-items: center; gap: 8px; }
-    .panel-hdr .badge-count { background: var(--tw-glow); color: var(--tw); border-radius: 6px; padding: 2px 8px; font-size: .72rem; font-weight: 600; }
-
-    .channel-tools { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-    .channel-search-wrap { position: relative; min-width: 150px; flex: 1 1 190px; max-width: 280px; }
-    .channel-search-wrap i { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--text3); pointer-events: none; }
-    .channel-search { width: 100%; background: var(--surface3); border: 1px solid var(--border); border-radius: 7px; padding: 6px 9px 6px 29px; color: var(--text1); font: inherit; font-size: .75rem; outline: none; }
-    .channel-search:focus { border-color: var(--tw); }
-    .channel-search::placeholder { color: var(--text3); }
-    .channel-sort-select { background: var(--surface3); border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; color: var(--text1); font: inherit; font-size: .75rem; outline: none; max-width: 190px; }
-    .channel-sort-select:focus { border-color: var(--tw); }
-    .channel-filter-select { background: var(--surface3); border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; color: var(--text1); font: inherit; font-size: .75rem; outline: none; max-width: 190px; }
-    .channel-filter-select:focus { border-color: var(--tw); }
-    @media (max-width: 640px) { .channel-tools { width: 100%; } .channel-search-wrap { max-width: none; flex-basis: 100%; } .channel-sort-select, .channel-filter-select { flex: 1; max-width: none; } }
-
-    .bulk-btns { display: flex; gap: 4px; flex-wrap: wrap; }
-    .bulk-btn { background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; color: var(--text2); cursor: pointer; font-family: inherit; font-size: .7rem; font-weight: 500; transition: all .15s; display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
-    .bulk-btn:hover { border-color: var(--text2); color: var(--text1); background: var(--surface3); }
-    .bulk-btn.bp:hover { border-color: #fbbf24; color: #fbbf24; }
-    .bulk-btn.br:hover { border-color: var(--online); color: var(--online); }
-    .bulk-btn.be:hover { border-color: var(--tw); color: var(--tw); }
-    .bulk-btn.bi-action:hover { border-color: #38bdf8; color: #38bdf8; }
-
-    .ch-list { max-height: 400px; overflow-y: auto; }
-    .ch-list::-webkit-scrollbar { width: 4px; }
-    .ch-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-    .ch-card { padding: 10px 14px; border-bottom: 1px solid var(--border); transition: background .15s; }
-    .ch-card:hover { background: var(--surface3); }
-    .ch-card:last-child { border-bottom: none; }
-    .ch-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
-    .ch-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
-    .ch-name { font-weight: 600; font-size: .92rem; color: var(--text1); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .ch-name:hover { color: var(--tw); }
-    .ch-badges { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; }
-    .badge-sm { font-size: .65rem; font-weight: 600; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; letter-spacing: .03em; display: inline-flex; align-items: center; gap: 3px; }
-    .badge-online { background: rgba(34,197,94,.12); color: #22c55e; }
-    .badge-offline { background: rgba(99,99,112,.12); color: var(--text3); }
-    .badge-verifying { background: rgba(251,191,36,.14); color: #d99c0b; }
-    .badge-error { background: rgba(239,68,68,.12); color: #ef4444; }
-    .badge-preview { background: rgba(56,189,248,.12); color: #38bdf8; }
-    .badge-rerun { background: rgba(148,163,184,.14); color: #cbd5e1; }
-    .badge-rec { background: rgba(239,68,68,.12); color: #ef4444; }
-.badge-sleeping { background: rgba(167,139,250,.14); color: #a78bfa; }
-.ch-btn.btn-sleep { border-color: rgba(167,139,250,.35); }
-.ch-btn.btn-sleep:hover, .ch-btn.btn-sleep.active { border-color: #a78bfa; color: #a78bfa; background: rgba(167,139,250,.12); }
-.ch-btn:disabled { opacity: .35; cursor: not-allowed; }
-    .badge-waiting { background: rgba(145,70,255,.1); color: var(--tw); }
-    .dot-rec { width: 6px; height: 6px; border-radius: 50%; background: var(--rec); animation: pulse 1.2s ease infinite; }
-    .ch-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    .ch-quality-row { display: flex; align-items: center; gap: 6px; }
-    .ch-quality-label { font-size: .7rem; color: var(--text3); }
-    .ch-quality-effective { font-size: .65rem; color: #fbbf24; font-weight: 600; white-space: nowrap; }
-    .import-update-option { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; color: var(--text2); font-size: .8rem; line-height: 1.4; }
-    .import-update-option input { margin-top: 3px; accent-color: var(--tw); }
-    .import-help { color: var(--text3); font-size: .72rem; margin: 6px 0 0; line-height: 1.45; }
-    .ch-actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
-    .ch-btn { background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; color: var(--text2); cursor: pointer; font-size: .78rem; transition: all .15s; display: inline-flex; align-items: center; gap: 3px; }
-    .ch-btn:hover { border-color: var(--text2); color: var(--text1); background: var(--surface3); }
-    .ch-btn.btn-pause:hover { border-color: #fbbf24; color: #fbbf24; }
-    .ch-btn.btn-play:hover { border-color: var(--online); color: var(--online); }
-    .ch-btn.btn-single-live:hover, .ch-btn.btn-single-live.active { border-color: #38bdf8; color: #38bdf8; background: rgba(56,189,248,.09); }
-    .ch-btn.btn-del:hover { border-color: var(--rec); color: var(--rec); }
-    .uptime-tag { font-family: 'JetBrains Mono', monospace; font-size: .65rem; color: var(--text3); margin-left: 4px; }
-    .ch-diagnostics { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding-top: 7px; color: var(--text3); font-size: .68rem; }
-    .ch-diagnostics .diag-error { color: #ef4444; max-width: min(100%, 540px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .monitor-strip { margin: 10px 0 14px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface2); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: .75rem; color: var(--text2); }
-    .monitor-status { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 4px 8px; font-weight: 700; background: rgba(34,197,94,.12); color: #22c55e; }
-    .monitor-status.degraded { background: rgba(251,191,36,.14); color: #d99c0b; }
-    .monitor-status.stopped { background: rgba(239,68,68,.12); color: #ef4444; }
-    .monitor-strip .monitor-details { flex: 1; min-width: 180px; }
-
-    .rec-list { max-height: 400px; overflow-y: auto; }
-    .rec-list, .ch-list { overflow-anchor: none; scrollbar-gutter: stable; }
-    [hidden] { display: none !important; }
-    .rec-list::-webkit-scrollbar { width: 4px; }
-    .rec-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-    .rec-item { padding: 8px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; transition: background .15s; }
-    .rec-item:hover { background: var(--surface3); }
-    .rec-item:last-child { border-bottom: none; }
-    .rec-info { min-width: 0; flex: 1; }
-    .rec-name { font-size: .82rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
-    .rec-meta { font-size: .7rem; color: var(--text3); }
-    .rec-actions { display: flex; gap: 3px; flex-shrink: 0; }
-    .rec-btn { background: transparent; border: 1px solid var(--border); border-radius: 5px; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; color: var(--text2); cursor: pointer; transition: all .15s; font-size: .82rem; }
-    .rec-btn:hover { border-color: var(--tw); color: var(--tw); background: var(--tw-glow); }
-    .rec-btn.del:hover { border-color: var(--rec); color: var(--rec); background: rgba(239,68,68,.08); }
-    .rec-btn a { color: inherit; text-decoration: none; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
-
-    /* Layout ampio e scroll indipendente per canali e registrazioni su desktop. */
-    @media (min-width: 1250px) {
-      .shell { width: 100%; max-width: none; padding: 20px clamp(18px, 2vw, 36px); }
-      .workspace-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(360px, .92fr); gap: 16px; align-items: start; }
-      .workspace-grid > .panel { min-width: 0; margin-bottom: 0; }
-      .workspace-grid .ch-list, .workspace-grid .rec-list { max-height: min(72vh, max(280px, calc(100vh - 330px))); min-height: 280px; overscroll-behavior: contain; }
-    }
-    @media (min-width: 1700px) {
-      .workspace-grid { grid-template-columns: minmax(0, 1.12fr) minmax(420px, .88fr); }
-    }
-
-    .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px 20px; color: var(--text3); text-align: center; }
-    .empty-state i { font-size: 2rem; margin-bottom: 8px; opacity: .4; }
-    .empty-state p { font-size: .85rem; margin: 0; }
-
-    .confirm-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 3000; align-items: center; justify-content: center; }
-    .confirm-backdrop.open { display: flex; }
-    .confirm-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 320px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,.4); }
-    .confirm-box p { margin: 0 0 16px; font-size: .9rem; }
-    .confirm-box strong { color: var(--tw); }
-    .confirm-btns { display: flex; gap: 8px; justify-content: center; }
-    .confirm-btns button { padding: 8px 20px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface3); color: var(--text1); cursor: pointer; font-family: inherit; font-weight: 500; font-size: .85rem; transition: all .15s; }
-    .confirm-btns .btn-danger { background: var(--rec); border-color: var(--rec); color: #fff; }
-    .confirm-btns .btn-danger:hover { background: #dc2626; }
-    .confirm-btns button:not(.btn-danger):hover { background: var(--border); }
-
-    .import-area { margin: 12px 0; }
-    .import-area input[type="file"] { display: none; }
-    .import-result { margin-top: 8px; font-size: .82rem; }
-    .import-result.ok { color: var(--online); }
-    .import-result.err { color: var(--rec); }
-
-    .toast-rack { position: fixed; top: 12px; right: 12px; z-index: 4000; display: flex; flex-direction: column; gap: 6px; }
-    .toast-msg { padding: 8px 16px; border-radius: 8px; font-size: .82rem; font-weight: 500; animation: fadeIn .2s; }
-    .toast-msg.success { background: rgba(34,197,94,.15); color: #22c55e; border: 1px solid rgba(34,197,94,.3); }
-    .toast-msg.warning { background: rgba(251,191,36,.15); color: #fbbf24; border: 1px solid rgba(251,191,36,.3); }
-    .toast-msg.danger { background: rgba(239,68,68,.15); color: #ef4444; border: 1px solid rgba(239,68,68,.3); }
-    @keyframes fadeIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:none} }
-    .plat-badge { font-size: .58rem; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: var(--surface3); color: var(--text2); border: 1px solid var(--border); text-transform: uppercase; letter-spacing: .3px; min-width: 26px; text-align: center; }
-    .plat-badge.plat-twitch { background: rgba(145,70,255,.14); color: #b896ff; border-color: rgba(145,70,255,.38); }
-    .plat-badge.plat-kick { background: rgba(83,252,24,.12); color: #53fc18; border-color: rgba(83,252,24,.38); }
-    .plat-badge.plat-youtube { background: rgba(255,0,51,.12); color: #ff405f; border-color: rgba(255,0,51,.38); }
-    .live-state-dot { display: inline-block; width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--text3); margin-right: 1px; }
-    .live-state-dot.online { background: #22c55e; box-shadow: 0 0 0 2px rgba(34,197,94,.12); }
-    .live-state-dot.offline { background: #ef4444; box-shadow: 0 0 0 2px rgba(239,68,68,.10); }
-    .live-state-dot.verifying { background: #fbbf24; }
-    .live-state-dot.uncertain { background: #f59e0b; }
-    .live-state-dot.sleeping { background: #a78bfa; }
-    .live-state-dot.private { background: #38bdf8; box-shadow: 0 0 0 2px rgba(56,189,248,.12); }
-    .live-state-dot.rerun { background: #94a3b8; box-shadow: 0 0 0 2px rgba(148,163,184,.12); }
-    .live-state-dot.unknown { background: #777783; }
-    .last-live-value { color: var(--text2); }
-    .preview-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.8); z-index: 3500; align-items: center; justify-content: center; padding: 16px; }
-    .preview-backdrop.open { display: flex; }
-    .preview-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; width: min(900px, 96vw); max-height: 92vh; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,.5); display: flex; flex-direction: column; }
-    .preview-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border); }
-    .preview-head .ttl { font-weight: 600; font-size: .9rem; display: flex; align-items: center; gap: 8px; }
-    .preview-close { background: var(--surface3); border: 1px solid var(--border); color: var(--text1); border-radius: 8px; width: 32px; height: 32px; cursor: pointer; font-size: 1rem; display: inline-flex; align-items: center; justify-content: center; }
-    .preview-close:hover { background: var(--border); }
-    .preview-body { position: relative; background: #000; aspect-ratio: 16/9; }
-    .preview-body video { width: 100%; height: 100%; display: block; background: #000; }
-    .preview-status { pointer-events: none; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--text2); font-size: .85rem; text-align: center; padding: 16px; }
-    .preview-spinner { width: 34px; height: 34px; border: 3px solid var(--border); border-top-color: var(--tw); border-radius: 50%; animation: spin .8s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .preview-unmute { position: absolute; left: 50%; bottom: 54px; transform: translateX(-50%); z-index: 5; display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 999px; border: none; background: var(--tw); color: #fff; font-family: inherit; font-weight: 600; font-size: .82rem; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
-    .preview-note { padding: 8px 14px; font-size: .72rem; color: var(--text3); border-top: 1px solid var(--border); }
-  </style>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg', v=static_v) }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v=static_v) }}">
+  <script>try{const t=localStorage.getItem("tr-theme");if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
 </head>
 <body>
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <defs>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-contrast" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3v18a9 9 0 0 0 0-18z" fill="currentColor"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14" stroke-width="3"/></symbol>
+    <symbol id="i-rec" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20zM12 10v4M12 17v.5"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/></symbol>
+    <symbol id="i-select" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="m8.5 12 2.5 2.5 4.5-5"/></symbol>
+    <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M3 15h18M8 5v14M16 5v14"/></symbol>
+    <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M17 3l3 3-3 3M4 11V9a3 3 0 0 1 3-3h13M7 21l-3-3 3-3M20 13v2a3 3 0 0 1-3 3H4"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V5M7 10l5-5 5 5M5 20h14"/></symbol>
+  </defs>
+</svg>
 
-<div class="toast-rack" id="toastRack"></div>
-
-<div class="confirm-backdrop" id="confirmRemove">
-  <div class="confirm-box">
-    <p>Rimuovere <strong id="confirmChName"></strong>?</p>
-    <div class="confirm-btns">
-      <button type="button" onclick="closeConfirm('confirmRemove')">Annulla</button>
-      <button type="button" class="btn-danger" id="confirmRemoveBtn">Rimuovi</button>
-    </div>
+<header class="topbar">
+  <div class="brand"><span class="brand-tally" aria-hidden="true"></span>Twitch Recorder</div>
+  <div class="bus" aria-live="polite">
+    <span class="bus-item bus-air" title="Canali in diretta"><b id="sOnline">0</b> in onda</span>
+    <span class="bus-item bus-rec" title="Registrazioni attive"><b id="sRec">0</b> in REC</span>
+    <span class="bus-item bus-rerun" id="sRerunWrap" hidden title="Live segnalate come possibili rerun"><b id="sRerun">0</b> rerun?</span>
   </div>
-</div>
-
-<div class="confirm-backdrop" id="confirmDelete">
-  <div class="confirm-box">
-    <p>Eliminare <strong id="confirmFileName" style="word-break:break-all"></strong>?</p>
-    <div class="confirm-btns">
-      <button type="button" onclick="closeConfirm('confirmDelete')">Annulla</button>
-      <button type="button" class="btn-danger" id="confirmDeleteBtn">Elimina</button>
-    </div>
+  <div class="disk" id="disk" title="Spazio su disco">
+    <div class="disk-bar"><div class="disk-fill" id="diskFill"></div></div>
+    <span id="diskText">—</span>
   </div>
-</div>
-
-<div class="confirm-backdrop" id="importModal">
-  <div class="confirm-box">
-    <p><i class="bi bi-upload"></i> Importa canali da <strong>JSON</strong> o <strong>CSV</strong></p>
-    <div class="import-area">
-      <label class="btn-tw" style="display:inline-block;padding:8px 20px;cursor:pointer">
-        <i class="bi bi-file-earmark-arrow-up"></i> Scegli file
-        <input type="file" id="importFile" accept=".json,.csv,.txt">
-      </label>
-      <label class="import-update-option">
-        <input type="checkbox" id="importUpdateExistingQuality">
-        <span><strong>Aggiorna la qualità dei canali già presenti</strong><br>Quando la qualità cambia, una REC attiva viene finalizzata e riparte in un nuovo file.</span>
-      </label>
-      <p class="import-help">Se non selezioni questa opzione, i canali con lo stesso nome vengono saltati come prima. Per i canali esistenti viene modificata solo la qualità; pausa, sonno e modalità Una volta non cambiano.</p>
-      <div class="import-result" id="importResult"></div>
-    </div>
-    <div class="confirm-btns" style="margin-top:16px">
-      <button type="button" onclick="closeConfirm('importModal')">Chiudi</button>
-    </div>
-  </div>
-</div>
-
-<div class="preview-backdrop" id="previewModal">
-  <div class="preview-box">
-    <div class="preview-head">
-      <div class="ttl"><i class="bi bi-play-circle" style="color:var(--tw)"></i><span id="previewTitle">Riproduzione</span></div>
-      <button type="button" class="preview-close" onclick="closePreview()"><i class="bi bi-x-lg"></i></button>
-    </div>
-    <div class="preview-body">
-      <video id="previewVideo" playsinline controls></video>
-      <div class="preview-status" id="previewStatus"><div class="preview-spinner"></div><span id="previewStatusText">Caricamento…</span></div>
-    </div>
-    <div class="preview-note" id="previewNote">Flusso live temporaneo; chiudendo il player, la connessione viene terminata.</div>
-  </div>
-</div>
-
-<div class="shell">
-  <div class="hdr">
-    <div class="hdr-brand"><i class="bi bi-camera-video-fill"></i><span>Twitch Recorder</span></div>
-    <div class="hdr-right">
-      <div class="config-tags" id="configTags"></div>
-      <div class="hdr-meta">
-        <span class="sse-dot connecting" id="sseDot"></span>
-        <span id="sseLabel">Connessione…</span>
-      </div>
-      {% if login_enabled %}
-      <form action="{{ url_for('logout') }}" method="post" class="logout-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token_value }}">
-        <button class="icon-btn" type="submit" title="Esci" aria-label="Esci"><i class="bi bi-box-arrow-right"></i></button>
-      </form>
-      {% endif %}
-      <button class="icon-btn" id="themeToggle" title="Tema"><i class="bi bi-circle-half"></i></button>
-    </div>
-  </div>
-
-  <div class="monitor-strip" aria-live="polite">
-    <span class="monitor-status" id="monitorStateBadge"><i class="bi bi-activity"></i> Monitor in avvio</span>
-    <span class="monitor-details" id="monitorDetails">Preparazione dei controlli…</span>
-    <button class="bulk-btn" type="button" onclick="forceCheckAll()" title="Richiedi subito un controllo per tutti i canali"><i class="bi bi-arrow-clockwise"></i> Controlla tutti</button>
-  </div>
-
-  <div class="stats-strip">
-    <div class="stat-pill"><div class="stat-icon" style="background:rgba(145,70,255,.1);color:var(--tw)"><i class="bi bi-people-fill"></i></div><div><div class="stat-val" id="sChannels">—</div><div class="stat-lbl">Canali</div></div></div>
-    <div class="stat-pill"><div class="stat-icon" style="background:rgba(34,197,94,.1);color:#22c55e"><i class="bi bi-broadcast"></i></div><div><div class="stat-val" id="sOnline">—</div><div class="stat-lbl">Online</div></div></div>
-    <div class="stat-pill"><div class="stat-icon" style="background:rgba(239,68,68,.1);color:#ef4444"><i class="bi bi-record-circle"></i></div><div><div class="stat-val" id="sRec">—</div><div class="stat-lbl">Registrando</div></div></div>
-    <div class="stat-pill"><div class="stat-icon" style="background:rgba(56,189,248,.1);color:#38bdf8"><i class="bi bi-play-circle"></i></div><div><div class="stat-val" id="sPreview">—</div><div class="stat-lbl">Preview attive</div></div></div>
-    <div class="stat-pill"><div class="stat-icon" style="background:rgba(56,189,248,.1);color:#38bdf8"><i class="bi bi-archive-fill"></i></div><div><div class="stat-val" id="sFiles">—</div><div class="stat-lbl">File</div></div></div>
-    <div class="stat-pill"><div class="stat-icon" style="background:rgba(251,191,36,.1);color:#fbbf24"><i class="bi bi-hdd-fill"></i></div><div><div class="stat-val" id="sSize">—</div><div class="stat-lbl">Usato</div></div></div>
-  </div>
-
-  <div class="disk-strip">
-    <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-      <small style="color:var(--text3);font-size:.72rem"><span id="diskUsed">—</span> / <span id="diskTotal">—</span></small>
-      <small style="color:var(--text2);font-weight:600;font-size:.72rem"><span id="diskFree">—</span> liberi</small>
-    </div>
-    <div class="disk-bar"><div class="disk-fill" id="diskFill" style="width:0%"></div></div>
-  </div>
-
-  <div class="add-bar">
-    <form id="addForm">
+  <div class="top-actions">
+    <span class="health" id="health" title="Stato del monitor"><span class="health-dot"></span><span id="healthText">Avvio…</span></span>
+    <button class="icon-btn" type="button" data-cmd="check-all" title="Controlla subito tutti i canali" aria-label="Controlla tutti i canali"><svg><use href="#i-refresh"/></svg></button>
+    <button class="icon-btn" type="button" data-cmd="settings" title="Impostazioni e strumenti" aria-label="Impostazioni"><svg><use href="#i-gear"/></svg></button>
+    <button class="icon-btn" type="button" data-cmd="theme" title="Cambia tema" aria-label="Cambia tema"><svg><use href="#i-contrast"/></svg></button>
+    {% if login_enabled %}
+    <form action="{{ url_for('logout') }}" method="post" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token_value }}">
-      <select id="addPlatform" title="Piattaforma"></select>
-      <input type="text" id="addChannel" placeholder="Nome canale o URL…" required autocomplete="off">
-      <select id="addQuality">
-        <option value="best">best</option>
-        <option value="1080p60">1080p60</option>
-        <option value="1080p">1080p</option>
-        <option value="720p60">720p60</option>
-        <option value="720p">720p</option>
-        <option value="480p">480p</option>
-        <option value="360p">360p</option>
-        <option value="160p">160p</option>
-        <option value="worst">worst</option>
-        <option value="audio_only">audio</option>
-      </select>
-      <button type="submit" class="btn-tw"><i class="bi bi-plus-lg"></i> Aggiungi</button>
+      <button class="icon-btn" type="submit" title="Esci" aria-label="Esci"><svg><use href="#i-logout"/></svg></button>
     </form>
+    {% endif %}
   </div>
+</header>
 
-  <div class="workspace-grid">
-  <div class="panel">
-    <div class="panel-hdr">
-      <div class="panel-hdr-left"><span><i class="bi bi-collection-play me-1"></i>Canali</span><span class="badge-count" id="chCount">0</span></div>
-      <div class="channel-tools">
-        <label class="channel-search-wrap" aria-label="Cerca canali">
-          <i class="bi bi-search"></i>
-          <input type="search" id="channelSearch" class="channel-search" placeholder="Cerca live o piattaforma…" autocomplete="off" spellcheck="false">
-        </label>
-        <select id="channelSort" class="channel-sort-select" aria-label="Ordina canali" title="Ordina canali">
+<nav class="tabs" role="tablist" aria-label="Sezioni">
+  <button type="button" role="tab" class="tab" data-tab="channels" aria-selected="true">Canali <span id="tabChCount"></span></button>
+  <button type="button" role="tab" class="tab" data-tab="recordings" aria-selected="false">Registrazioni <span id="tabRecCount"></span></button>
+</nav>
+
+<div class="layout" data-view="channels">
+  <main class="col-main" id="colChannels">
+    <div class="toolbar">
+      <form class="add" id="addForm" autocomplete="off">
+        <select id="addPlatform" aria-label="Piattaforma"></select>
+        <input id="addChannel" type="text" placeholder="Nome canale o link" aria-label="Nome canale o link" spellcheck="false">
+        <select id="addQuality" aria-label="Qualità"></select>
+        <button class="btn btn-primary" type="submit"><svg><use href="#i-plus"/></svg><span>Aggiungi</span></button>
+      </form>
+      <div class="finder">
+        <label class="search"><svg><use href="#i-search"/></svg><input type="search" id="search" placeholder="Cerca canale, titolo, gioco" aria-label="Cerca" spellcheck="false"><kbd>/</kbd></label>
+        <select id="sort" aria-label="Ordina">
           <option value="default">Priorità</option>
-          <option value="online">Live prima</option>
-          <option value="name">Nome A–Z</option>
+          <option value="name">Nome</option>
           <option value="last_live">Ultima live</option>
+          <option value="viewers">Spettatori</option>
           <option value="last_checked">Ultimo controllo</option>
         </select>
-        <select id="channelFilter" class="channel-filter-select" aria-label="Filtra canali" title="Mostra solo i canali selezionati">
-          <option value="all">Tutti i canali</option>
-          <option value="online">Solo online</option>
-          <option value="recording">Solo in REC</option>
-          <option value="not_paused">Non in pausa</option>
-          <option value="paused">Solo in pausa</option>
-          <option value="sleeping">Solo a dormire</option>
-          <option value="private">Solo private</option>
-          <option value="rerun">Solo rerun escluse</option>
-          <option value="offline">Solo offline</option>
-          <option value="uncertain">Da verificare</option>
-        </select>
-        <div class="bulk-btns" id="bulkBtns" style="display:none">
-          <button class="bulk-btn bp" onclick="bulkAction('pause_all')"><i class="bi bi-pause-fill"></i> Pausa</button>
-          <button class="bulk-btn br" onclick="bulkAction('resume_all')"><i class="bi bi-play-fill"></i> Riprendi</button>
-          <a href="/api/export?format=json" class="bulk-btn be"><i class="bi bi-download"></i> Export</a>
-          <button class="bulk-btn bi-action" onclick="openImport()"><i class="bi bi-upload"></i> Import</button>
-        </div>
+        <button class="btn btn-ghost" type="button" data-cmd="select-mode" aria-pressed="false" title="Seleziona più canali"><svg><use href="#i-select"/></svg><span>Seleziona</span></button>
       </div>
+      <div class="chips" id="chips" role="radiogroup" aria-label="Filtro"></div>
     </div>
-    <div class="ch-list" id="chList"><div class="empty-state"><i class="bi bi-tv"></i><p>Caricamento…</p></div></div>
-  </div>
 
-  <div class="panel">
-    <div class="panel-hdr">
-      <div class="panel-hdr-left"><span><i class="bi bi-film me-1"></i>Registrazioni</span><span class="badge-count" id="recTotalSize">—</span></div>
+    <section class="wall-section" id="wallSection" hidden>
+      <h2 class="section-title">In onda</h2>
+      <div class="wall" id="wall"></div>
+    </section>
+
+    <section class="list-section" id="listSection">
+      <h2 class="section-title" id="listTitle">Canali</h2>
+      <div class="rows" id="rows"></div>
+    </section>
+    <div class="empty" id="emptyChannels" hidden></div>
+  </main>
+
+  <aside class="col-side" id="colRecordings">
+    <div class="side-head">
+      <h2 class="section-title">Registrazioni <span class="muted" id="recTotal"></span></h2>
+      <label class="search small"><svg><use href="#i-search"/></svg><input type="search" id="recSearch" placeholder="Filtra file" aria-label="Filtra registrazioni" spellcheck="false"></label>
     </div>
-    <div class="rec-list" id="recList"><div class="empty-state"><i class="bi bi-inbox"></i><p>Caricamento…</p></div></div>
-  </div>
+    <div class="recs" id="recs"></div>
+  </aside>
+</div>
+
+<div class="bulkbar" id="bulkbar" hidden>
+  <span id="bulkCount">0 selezionati</span>
+  <button class="btn btn-ghost" type="button" data-bulk="resume">Registra</button>
+  <button class="btn btn-ghost" type="button" data-bulk="pause">Pausa</button>
+  <button class="btn btn-ghost" type="button" data-bulk="sleep">Metti a dormire</button>
+  <button class="btn btn-ghost" type="button" data-bulk="wake">Risveglia</button>
+  <button class="btn btn-ghost" type="button" data-bulk="check">Controlla</button>
+  <select id="bulkQuality" aria-label="Imposta qualità"><option value="">Qualità…</option></select>
+  <select id="bulkRerun" aria-label="Politica rerun">
+    <option value="">Rerun…</option>
+    <option value="default">Predefinita</option>
+    <option value="mark">Registra e segna</option>
+    <option value="skip">Salta</option>
+    <option value="record">Ignora</option>
+  </select>
+  <button class="btn btn-danger" type="button" data-bulk="remove">Rimuovi</button>
+  <button class="icon-btn" type="button" data-cmd="select-mode" aria-label="Chiudi selezione"><svg><use href="#i-x"/></svg></button>
+</div>
+
+<!-- Pannello laterale: dettaglio canale / impostazioni -->
+<div class="drawer" id="drawer" aria-hidden="true">
+  <div class="drawer-scrim" data-cmd="close-drawer"></div>
+  <section class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+    <header class="drawer-head">
+      <h2 id="drawerTitle"></h2>
+      <button class="icon-btn" type="button" data-cmd="close-drawer" aria-label="Chiudi"><svg><use href="#i-x"/></svg></button>
+    </header>
+    <div class="drawer-body" id="drawerBody"></div>
+  </section>
+</div>
+
+<!-- Player -->
+<div class="player" id="player" aria-hidden="true">
+  <div class="player-box" role="dialog" aria-modal="true" aria-labelledby="playerTitle">
+    <header class="player-head">
+      <span class="player-tally" id="playerTally"></span>
+      <h2 id="playerTitle"></h2>
+      <a class="icon-btn" id="playerExternal" target="_blank" rel="noopener noreferrer" title="Apri sulla piattaforma" aria-label="Apri sulla piattaforma"><svg><use href="#i-external"/></svg></a>
+      <button class="icon-btn" type="button" data-cmd="close-player" aria-label="Chiudi player"><svg><use href="#i-x"/></svg></button>
+    </header>
+    <div class="player-stage">
+      <video id="video" controls playsinline></video>
+      <div class="player-status" id="playerStatus"><span class="spinner"></span><span id="playerStatusText">Caricamento…</span></div>
+    </div>
+    <p class="player-note" id="playerNote"></p>
   </div>
 </div>
 
-<script>
-(() => {
-  "use strict";
-  let qualityOpts = [], currentSort = localStorage.getItem("tr-sort") || "default";
-  if (!['default','online','name','last_live','last_checked'].includes(currentSort)) currentSort = 'default';
-  let currentFilter = localStorage.getItem("tr-filter") || "all";
-  if (!['all','online','recording','not_paused','paused','sleeping','private','rerun','offline','uncertain'].includes(currentFilter)) currentFilter = 'all';
-  let platforms = [];
-  let lastData = null, evtSource = null, reconnectTimer = null;
-  let _pendingRemove = "", _pendingRemovePlat = "", _pendingDelete = "";
-  let lastChannelInteraction = 0, reorderTimer = null;
-  const recordingRows = new Map();
-  const channelRows = new Map();
+<dialog class="confirm" id="confirm">
+  <form method="dialog">
+    <p id="confirmText"></p>
+    <div class="confirm-actions">
+      <button class="btn btn-ghost" value="cancel">Annulla</button>
+      <button class="btn btn-danger" value="ok" id="confirmOk">Conferma</button>
+    </div>
+  </form>
+</dialog>
 
-  const html = document.documentElement;
-  const saved = localStorage.getItem("tr-theme");
-  if (saved) html.setAttribute("data-bs-theme", saved);
-  document.getElementById("themeToggle").addEventListener("click", () => {
-    const n = html.getAttribute("data-bs-theme") === "dark" ? "light" : "dark";
-    html.setAttribute("data-bs-theme", n); localStorage.setItem("tr-theme", n);
-  });
+<div class="toasts" id="toasts" aria-live="polite"></div>
 
-  function toast(msg, type="success") {
-    const t = document.createElement("div");
-    t.className = `toast-msg ${type}`; t.textContent = msg;
-    document.getElementById("toastRack").appendChild(t);
-    setTimeout(() => t.remove(), 3000);
-  }
-
-  function goToLogin() {
-    const next = window.location.pathname + window.location.search;
-    window.location.href = `/login?next=${encodeURIComponent(next)}`;
-  }
-
-  async function api(url, body) {
-    try {
-      const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-      const r = await fetch(url, {method:"POST", credentials:"same-origin", headers:{"Content-Type":"application/json", "X-CSRF-Token":csrf}, body:JSON.stringify(body)});
-      if (r.status === 401) { goToLogin(); return {ok:false}; }
-      return await r.json();
-    } catch(e) { toast("Errore di rete", "danger"); return {ok:false}; }
-  }
-
-  function uptime(s) {
-    if (!s) return "";
-    const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sc=s%60;
-    return h>0?`${h}h${String(m).padStart(2,'0')}m`:m>0?`${m}m${String(sc).padStart(2,'0')}s`:`${sc}s`;
-  }
-  function timestampMs(value) {
-    if (value === null || value === undefined || value === "") return null;
-    if (typeof value === "number" && Number.isFinite(value)) return value * 1000;
-    const numeric = Number(value);
-    if (String(value).trim() !== "" && Number.isFinite(numeric)) return numeric * 1000;
-    const parsed = Date.parse(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  function relativeTimestamp(value) {
-    const ms = timestampMs(value);
-    if (ms === null) return "mai rilevata";
-    const sec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
-    if (sec < 60) return sec < 5 ? "adesso" : `${sec}s fa`;
-    if (sec < 3600) return `${Math.floor(sec / 60)} min fa`;
-    if (sec < 86400) return `${Math.floor(sec / 3600)} h fa`;
-    return `${Math.floor(sec / 86400)} giorni fa`;
-  }
-  function formatTimestamp(value) {
-    const ms = timestampMs(value);
-    return ms === null ? "Data non disponibile" : new Date(ms).toLocaleString();
-  }
-  function esc(s) { const d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
-
-  window.setSortMode = function(mode) {
-    if (!['default','online','name','last_live','last_checked'].includes(mode)) mode = 'default';
-    currentSort = mode;
-    localStorage.setItem("tr-sort", mode);
-    const sort = document.getElementById('channelSort');
-    if (sort) sort.value = mode;
-    if (lastData) renderChannels(lastData.channels || [], lastData.config || {}, true);
-  };
-
-  const searchInput = document.getElementById('channelSearch');
-  const sortInput = document.getElementById('channelSort');
-  const filterInput = document.getElementById('channelFilter');
-  if (sortInput) sortInput.value = currentSort;
-  if (filterInput) filterInput.value = currentFilter;
-  if (searchInput) searchInput.addEventListener('input', () => {
-    lastChannelInteraction = Date.now();
-    if (lastData) renderChannels(lastData.channels || [], lastData.config || {}, true);
-  });
-  if (sortInput) sortInput.addEventListener('change', () => {
-    lastChannelInteraction = Date.now();
-    window.setSortMode(sortInput.value);
-  });
-  if (filterInput) filterInput.addEventListener('change', () => {
-    currentFilter = ['all','online','recording','not_paused','paused','sleeping','private','rerun','offline','uncertain'].includes(filterInput.value) ? filterInput.value : 'all';
-    localStorage.setItem('tr-filter', currentFilter);
-    lastChannelInteraction = Date.now();
-    if (lastData) renderChannels(lastData.channels || [], lastData.config || {}, true);
-  });
-
-  const channelListElement = document.getElementById('chList');
-  if (channelListElement) {
-    ['pointerdown','focusin','click','change'].forEach(type => channelListElement.addEventListener(type, () => {
-      lastChannelInteraction = Date.now();
-    }, true));
-    channelListElement.addEventListener('click', async event => {
-      const button = event.target.closest('button[data-action]');
-      if (!button) return;
-      const card = button.closest('.ch-card');
-      if (!card) return;
-      const name = card.dataset.name || '', platform = card.dataset.platform || 'twitch';
-      switch (button.dataset.action) {
-        case 'live': window.openLive(name, platform); break;
-        case 'single-live': await window.toggleSingleLive(name, platform); break;
-        case 'sleep': await window.toggleSleep(name, platform); break;
-        case 'record-toggle': await window.chAction(card.dataset.recording === 'true' ? 'pause' : 'resume', name, platform); break;
-        case 'force-check': await window.forceCheck(name, platform); break;
-        case 'remove': window.confirmRemoveCh(name, platform); break;
-      }
-    });
-    channelListElement.addEventListener('change', async event => {
-      const select = event.target.closest('select[data-action="quality"]');
-      if (!select) return;
-      const card = select.closest('.ch-card');
-      if (!card) return;
-      const requested = select.value;
-      const result = await api('/api/room', {action:'set_quality', channel:card.dataset.name, platform:card.dataset.platform, quality:requested});
-      toast(result.msg || (result.ok ? 'Qualità aggiornata' : 'Errore nel cambio qualità'), result.ok ? 'success' : 'warning');
-      if (!result.ok && lastData) {
-        const latest = (lastData.channels || []).find(ch => ch.name === card.dataset.name);
-        if (latest) select.value = latest.quality;
-      }
-    });
-  }
-
-  function channelLastLiveMs(ch) {
-    return timestampMs(ch.last_live || ch.last_online) || 0;
-  }
-  function channelLastCheckedMs(ch) {
-    // L'API espone last_checked come età in secondi: meno secondi = controllo più recente.
-    return Number.isFinite(Number(ch.last_checked)) && ch.last_checked !== null ? -Number(ch.last_checked) : 0;
-  }
-  function channelPriority(ch) {
-    if (ch.actually_recording) return 0;
-    if (ch.online && ch.is_recording) return 1;
-    if (ch.online) return 2;
-    if (ch.last_status === 'private' || ch.last_check_result === 'private') return 3;
-    if (ch.last_check_result === 'verifying_offline' || ch.last_check_result === 'error' || ch.last_check_result === 'checking' || ch.last_status === 'unknown') return 4;
-    if (ch.last_status === 'rerun' || ch.last_check_result === 'rerun') return 6;
-    if (ch.is_recording && !ch.sleeping) return 5;
-    if (ch.sleeping) return 7;
-    return 6;
-  }
-  function sortChannels(channels) {
-    const sorted = [...channels];
-    if (currentSort === 'name') sorted.sort((a,b) => a.name.localeCompare(b.name, undefined, {sensitivity:'base'}));
-    else if (currentSort === 'online') sorted.sort((a,b) => {
-      const rank = ch => ch.actually_recording ? 0 : ch.online ? 1 : ch.last_check_result === 'verifying_offline' || ch.last_check_result === 'error' ? 2 : ch.last_status === 'rerun' || ch.last_check_result === 'rerun' ? 4 : ch.sleeping ? 5 : 3;
-      return rank(a)-rank(b) || a.name.localeCompare(b.name, undefined, {sensitivity:'base'});
-    });
-    else if (currentSort === 'last_live') sorted.sort((a,b) => channelLastLiveMs(b)-channelLastLiveMs(a) || a.name.localeCompare(b.name, undefined, {sensitivity:'base'}));
-    else if (currentSort === 'last_checked') sorted.sort((a,b) => channelLastCheckedMs(b)-channelLastCheckedMs(a) || a.name.localeCompare(b.name, undefined, {sensitivity:'base'}));
-    else sorted.sort((a,b) => channelPriority(a)-channelPriority(b) || channelLastLiveMs(b)-channelLastLiveMs(a) || a.name.localeCompare(b.name, undefined, {sensitivity:'base'}));
-    return sorted;
-  }
-
-  function makeChannelCard() {
-    const card = document.createElement('div');
-    card.className = 'ch-card';
-    card.innerHTML = `
-      <div class="ch-top">
-        <div class="ch-top-main">
-          <div class="ch-name-row">
-            <span class="live-state-dot unknown" data-part="state-dot" title="Stato non ancora confermato" aria-label="Stato non ancora confermato"></span>
-            <a href="#" target="_blank" rel="noopener noreferrer" class="ch-name" data-part="name"></a>
-            <div class="ch-badges" data-part="badges"></div>
-          </div>
-          <div class="ch-diagnostics" data-part="diagnostics"></div>
-        </div>
-      </div>
-      <div class="ch-bottom">
-        <div class="ch-quality-row"><span class="ch-quality-label">Qualità:</span><select class="ch-quality-select" data-action="quality" aria-label="Qualità registrazione"></select><span class="ch-quality-effective" data-part="quality-effective" hidden></span></div>
-        <div class="ch-actions">
-          <button type="button" class="ch-btn btn-play" data-action="live" title="Guarda la live"><i class="bi bi-broadcast"></i> Guarda live</button>
-          <button type="button" class="ch-btn btn-single-live" data-action="single-live" title="Attiva Una volta"><i class="bi bi-clock"></i> Una volta</button>
-          <button type="button" class="ch-btn btn-sleep" data-action="sleep" title="A dormire" aria-label="A dormire"><i class="bi bi-moon"></i></button>
-          <button type="button" class="ch-btn btn-play" data-action="record-toggle" title="Riprendi registrazione"><i class="bi bi-play-fill"></i></button>
-          <button type="button" class="ch-btn" data-action="force-check" title="Forza subito un controllo"><i class="bi bi-arrow-clockwise"></i></button>
-          <button type="button" class="ch-btn btn-del" data-action="remove" title="Rimuovi canale"><i class="bi bi-trash3"></i></button>
-        </div>
-      </div>`;
-    return card;
-  }
-
-  function updateChannelCard(card, ch, config) {
-    card.dataset.name = ch.name;
-    card.dataset.platform = ch.platform || 'twitch';
-    card.dataset.recording = ch.is_recording ? 'true' : 'false';
-    const name = card.querySelector('[data-part="name"]');
-    name.textContent = ch.name;
-    name.href = ch.home_url || ((ch.platform || 'twitch') === 'youtube' ? `https://www.youtube.com/@${encodeURIComponent(ch.name)}` : `https://${ch.platform === 'kick' ? 'kick.com' : 'twitch.tv'}/${encodeURIComponent(ch.name)}`);
-
-    let badgeOnline = '';
-    if (ch.sleeping) {
-      badgeOnline = '<span class="badge-sm badge-sleeping" title="Il canale non viene controllato finché non lo risvegli"><i class="bi bi-moon-stars-fill"></i> A dormire · check sospesi</span>';
-    } else if (ch.last_check_result === 'verifying_offline') {
-      badgeOnline = `<span class="badge-sm badge-verifying" title="Esiti offline ${ch.offline_confirmation_count}/${ch.offline_confirmations_required}; la registrazione non viene fermata finché non sono confermati"><i class="bi bi-hourglass-split"></i> Verifica ${ch.offline_confirmation_count}/${ch.offline_confirmations_required}</span>`;
-    } else if (ch.last_check_result === 'error') {
-      badgeOnline = `<span class="badge-sm badge-error" title="Ultimo stato confermato: ${esc(ch.last_status||'sconosciuto')}. ${esc(ch.last_error||'Errore temporaneo; lo stato confermato viene mantenuto')}"><i class="bi bi-exclamation-triangle"></i> Incerto · ${ch.last_status==='online'?'online':'offline'}?</span>`;
-    } else if (ch.last_check_result === 'rerun') {
-      badgeOnline = '<span class="badge-sm badge-rerun" title="Rerun rilevata tramite metadati Twitch: la registrazione viene saltata"><i class="bi bi-skip-forward-fill"></i> Rerun esclusa</span>';
-    } else if (ch.last_status === 'private' || ch.last_check_result === 'private') {
-      badgeOnline = '<span class="badge-sm badge-preview" title="Il canale risulta privato o accessibile solo agli abbonati"><i class="bi bi-lock-fill"></i> Privata</span>';
-    } else if (!ch.online && (ch.last_status === 'unknown' || ch.last_check_result === 'checking')) {
-      badgeOnline = '<span class="badge-sm badge-verifying"><i class="bi bi-hourglass-split"></i> In verifica</span>';
-    }
-    let recordingBadge = '';
-    if (ch.actually_recording) {
-      recordingBadge = `<span class="badge-sm badge-rec"><span class="dot-rec"></span>REC</span>${ch.uptime ? `<span class="uptime-tag">${uptime(ch.uptime)}</span>` : ''}`;
-    } else if (ch.is_recording) recordingBadge = '<span class="badge-sm badge-waiting">In attesa</span>';
-    else if (ch.sleeping) recordingBadge = '<span class="badge-sm badge-sleeping"><i class="bi bi-moon-stars-fill"></i> Registrazione ferma</span>';
-
-    const previewBadge = ch.preview_active
-      ? `<span class="badge-sm badge-preview" title="${ch.preview_mode==='shared'?'La preview usa il flusso della registrazione':'Flusso temporaneo chiuso alla chiusura del player'}"><i class="bi bi-play-circle"></i> Preview ${ch.preview_mode==='shared'?'condivisa':'temporanea'}${ch.preview_connections>1?' ×'+ch.preview_connections:''}</span>` : '';
-    const platKey = ['twitch','kick','youtube'].includes(ch.platform) ? ch.platform : 'unknown';
-    const plat = `<span class="plat-badge plat-${platKey}" title="${esc(ch.platform_label||ch.platform||'Piattaforma')}" aria-label="${esc(ch.platform_label||ch.platform||'Piattaforma')}">${esc(ch.platform_short||({'twitch':'TW','kick':'KI','youtube':'YT'}[platKey]||'??'))}</span>`;
-    const singleLiveBadge = ch.single_live_mode
-      ? `<span class="badge-sm" style="background:rgba(56,189,248,.12);color:#38bdf8" title="${ch.single_live_offline_remaining!=null?'Pausa automatica dopo il conto alla rovescia, dopo un controllo finale':'La modalità si disattiva 2 ore dopo la fine confermata della live'}">${ch.single_live_offline_remaining!=null?`Attesa ${uptime(ch.single_live_offline_remaining)}`:(!ch.single_live_seen_online?'Una volta · in attesa':'Una volta · attiva')}</span>` : '';
-    const lastLive = ch.last_live || ch.last_online;
-    const lastLiveBadge = lastLive
-      ? `<span class="last-live-value" title="Ultima live rilevata: ${esc(formatTimestamp(lastLive))}">Last live ${esc(relativeTimestamp(lastLive))}</span>`
-      : '<span class="last-live-value" title="Non è ancora stata rilevata una live">Last live mai rilevata</span>';
-    const lastChecked = ch.sleeping ? '<span class="uptime-tag" title="I controlli sono sospesi dalla modalità A dormire">Check sospesi</span>' : ch.last_checked != null ? `<span class="uptime-tag" title="Ultimo controllo riuscito o fallito">Check ${uptime(ch.last_checked)} fa</span>` : '<span class="uptime-tag" style="color:var(--rec)">mai controllato</span>';
-    const retries = ch.reconnect_attempts ? `<span title="Tentativi correnti di riconnessione">Riconnessioni ${ch.reconnect_attempts}/${config.reconnect_tries ?? 3}</span>` : '';
-    const checkFails = ch.check_failures ? `<span title="Errori consecutivi nel monitor">Errori check ${ch.check_failures}</span>` : '';
-    const errorRow = ch.last_error ? `<span class="diag-error" title="${esc(ch.last_error)}">Errore: ${esc(ch.last_error)}</span>` : '';
-    const badgeContainer = card.querySelector('[data-part="badges"]');
-    const badgeHtml = `${plat}${badgeOnline}${recordingBadge}${previewBadge}${singleLiveBadge}${lastChecked}`;
-    if (badgeContainer.innerHTML !== badgeHtml) badgeContainer.innerHTML = badgeHtml;
-    const diagnostics = card.querySelector('[data-part="diagnostics"]');
-    const diagnosticsHtml = `${lastLiveBadge}${retries}${checkFails}${errorRow}`;
-    if (diagnostics.innerHTML !== diagnosticsHtml) diagnostics.innerHTML = diagnosticsHtml;
-
-    let dotState = 'unknown', dotTitle = 'Stato non ancora confermato';
-    if (ch.sleeping) { dotState = 'sleeping'; dotTitle = 'A dormire: stato non aggiornato perché i controlli sono sospesi'; }
-    else if (ch.last_check_result === 'verifying_offline') { dotState = 'verifying'; dotTitle = 'Verifica della fine della live in corso'; }
-    else if (ch.last_check_result === 'error') { dotState = 'uncertain'; dotTitle = 'Controllo incerto; ultimo stato confermato: ' + (ch.last_status || 'sconosciuto'); }
-    else if (ch.last_check_result === 'rerun') { dotState = 'rerun'; dotTitle = 'Rerun rilevata; registrazione saltata'; }
-    else if (ch.last_status === 'private' || ch.last_check_result === 'private') { dotState = 'private'; dotTitle = 'Live privata'; }
-    else if (ch.online || ch.last_status === 'online') { dotState = 'online'; dotTitle = 'Online'; }
-    else if (ch.last_status === 'offline' && ch.last_check_result === 'offline') { dotState = 'offline'; dotTitle = 'Offline confermato'; }
-    const dot = card.querySelector('[data-part="state-dot"]');
-    dot.className = `live-state-dot ${dotState}`; dot.title = dotTitle; dot.setAttribute('aria-label', dotTitle);
-
-    const q = card.querySelector('[data-action="quality"]');
-    const optionValues = Array.from(q.options).map(o => o.value);
-    if (optionValues.join('|') !== qualityOpts.join('|')) {
-      const selected = ch.quality || qualityOpts[0] || 'best';
-      q.replaceChildren(...qualityOpts.map(value => { const o=document.createElement('option'); o.value=value; o.textContent=value; return o; }));
-      q.value = selected;
-    } else if (document.activeElement !== q && q.value !== ch.quality) q.value = ch.quality;
-    const effectiveQuality = card.querySelector('[data-part="quality-effective"]');
-    const qualityFallback = !!(ch.actually_recording && ch.resolved_quality &&
-      ch.resolved_quality !== ch.quality && !['best','worst','audio_only'].includes(ch.resolved_quality));
-    effectiveQuality.hidden = !qualityFallback;
-    effectiveQuality.textContent = qualityFallback ? `selezionata ${ch.resolved_quality}` : '';
-    effectiveQuality.title = qualityFallback
-      ? `Qualità richiesta: ${ch.quality}. Streamlink seleziona ${ch.resolved_quality} perché la variante richiesta non è disponibile.` : '';
-    q.title = qualityFallback
-      ? `Qualità richiesta: ${ch.quality}; selezionata da Streamlink: ${ch.resolved_quality}. Cambiare qualità durante REC apre un nuovo file.`
-      : `Qualità richiesta: ${ch.quality || 'best'}. Cambiare qualità durante REC apre un nuovo file.`;
-
-    const liveBtn = card.querySelector('[data-action="live"]');
-    liveBtn.title = ch.online ? 'Guarda la live; durante REC usa il flusso condiviso' : 'Prova ad aprire il flusso live';
-    const onceBtn = card.querySelector('[data-action="single-live"]');
-    onceBtn.className = `ch-btn btn-single-live${ch.single_live_mode?' active':''}`;
-    onceBtn.title = ch.single_live_mode
-      ? 'Una volta è attiva. Dopo la fine della live attende 2 ore; se torna online, registra la successiva. Clicca per disattivare.'
-      : 'Attiva Una volta anche da Pausa: registra la live corrente o la prossima; dopo 2 ore senza nuove live mette in pausa.';
-    onceBtn.querySelector('i').className = `bi ${ch.single_live_mode?'bi-clock-fill':'bi-clock'}`;
-    const sleepBtn = card.querySelector('[data-action="sleep"]');
-    const sleepTitle = ch.sleeping ? 'Risveglia: riattiva il monitor senza iniziare REC' : 'A dormire: ferma REC e sospende tutti i controlli automatici';
-    sleepBtn.className = `ch-btn btn-sleep${ch.sleeping?' active':''}`;
-    sleepBtn.title = sleepTitle; sleepBtn.setAttribute('aria-label', sleepTitle);
-    sleepBtn.querySelector('i').className = `bi ${ch.sleeping?'bi-moon-stars-fill':'bi-moon'}`;
-    const recBtn = card.querySelector('[data-action="record-toggle"]');
-    recBtn.disabled = !!ch.sleeping;
-    recBtn.className = `ch-btn ${ch.is_recording?'btn-pause':'btn-play'}`;
-    recBtn.title = ch.sleeping ? 'Prima risveglia il canale con la luna' : ch.is_recording ? 'Metti in pausa la registrazione; il monitor continua' : 'Riprendi la registrazione';
-    recBtn.querySelector('i').className = `bi ${ch.is_recording?'bi-pause-fill':'bi-play-fill'}`;
-    const forceBtn = card.querySelector('[data-action="force-check"]');
-    forceBtn.disabled = !!ch.sleeping;
-    forceBtn.title = ch.sleeping ? 'Controllo sospeso: risveglia il canale per controllarlo' : 'Forza subito un controllo';
-    const removeBtn = card.querySelector('[data-action="remove"]');
-    removeBtn.title = `Rimuovi ${ch.name}`;
-  }
-
-  function renderChannels(channels, config = {}, forceReorder = false) {
-    const list = document.getElementById('chList');
-    const term = (searchInput?.value || '').trim().toLocaleLowerCase();
-    const matchesFilter = ch => {
-      const privateRoom = ch.last_status === 'private' || ch.last_check_result === 'private';
-      switch (currentFilter) {
-        case 'online': return !!ch.online && !ch.sleeping;
-        case 'recording': return !!ch.actually_recording;
-        case 'not_paused': return !!ch.is_recording && !ch.sleeping && !privateRoom;
-        case 'paused': return !ch.is_recording && !ch.sleeping && !privateRoom;
-        case 'sleeping': return !!ch.sleeping;
-        case 'private': return privateRoom;
-        case 'rerun': return !ch.sleeping && (ch.last_status === 'rerun' || ch.last_check_result === 'rerun');
-        case 'offline': return !ch.sleeping && !privateRoom && !ch.online && ch.last_status === 'offline' && ch.last_check_result === 'offline';
-        case 'uncertain': return !ch.sleeping && (['verifying_offline','error','checking'].includes(ch.last_check_result) || ch.last_status === 'unknown');
-        default: return true;
-      }
-    };
-    const filtered = channels.filter(ch => matchesFilter(ch) && (!term || `${ch.name} ${ch.platform||''} ${ch.platform_label||''} ${ch.platform_short||''}`.toLocaleLowerCase().includes(term)));
-    const total = channels.length;
-    document.getElementById('chCount').textContent = (term || currentFilter !== 'all') ? `${filtered.length}/${total}` : total;
-    const empty = list.querySelector('.empty-state');
-    if (!filtered.length) {
-      if (term || currentFilter !== 'all') {
-        for (const row of channelRows.values()) row.hidden = true;
-      } else {
-        for (const [name,row] of channelRows) { row.remove(); channelRows.delete(name); }
-      }
-      if (!empty) {
-        const emptyRow = document.createElement('div');
-        emptyRow.className = 'empty-state';
-        emptyRow.innerHTML = `<i class="bi bi-${total?'search':'tv'}"></i><p>${total?'Nessun canale corrisponde alla ricerca o al filtro':'Nessun canale — aggiungine uno!'}</p>`;
-        list.appendChild(emptyRow);
-      } else {
-        empty.querySelector('p').textContent = total ? 'Nessun canale corrisponde alla ricerca o al filtro' : 'Nessun canale — aggiungine uno!';
-      }
-      return;
-    }
-    if (empty) empty.remove();
-    const filteredNames = new Set(filtered.map(ch => ch.name));
-    for (const [name,row] of channelRows) {
-      if (!channels.some(ch => ch.name === name)) { row.remove(); channelRows.delete(name); }
-      else row.hidden = !filteredNames.has(name);
-    }
-    filtered.forEach(ch => {
-      let card = channelRows.get(ch.name);
-      if (!card) { card = makeChannelCard(); channelRows.set(ch.name, card); }
-      card.hidden = false;
-      updateChannelCard(card, ch, config);
-    });
-    // Evita di spostare schede sotto il puntatore o un selettore che ha il focus.
-    // I nodi delle schede restano gli stessi anche quando cambiano stato e dati.
-    const ordered = sortChannels(filtered);
-    const current = Array.from(list.querySelectorAll('.ch-card:not([hidden])')).map(card => card.dataset.name);
-    const desired = ordered.map(ch => ch.name);
-    const orderChanged = current.length !== desired.length || current.some((name,index) => name !== desired[index]);
-    const toolbarFocused = document.activeElement === searchInput || document.activeElement === sortInput || document.activeElement === filterInput;
-    const interactionActive = list.contains(document.activeElement) || toolbarFocused || (Date.now() - lastChannelInteraction < 1200);
-    if (forceReorder || (orderChanged && !interactionActive)) {
-      ordered.forEach(ch => list.appendChild(channelRows.get(ch.name)));
-    } else {
-      // Nuovi canali vengono aggiunti in coda finché l'utente non ha finito di interagire.
-      ordered.forEach(ch => { const row=channelRows.get(ch.name); if (!row.isConnected) list.appendChild(row); });
-      if (orderChanged && !reorderTimer) {
-        reorderTimer = setTimeout(() => {
-          reorderTimer = null;
-          const toolbarStillFocused = document.activeElement === searchInput || document.activeElement === sortInput || document.activeElement === filterInput;
-          if (lastData && !list.contains(document.activeElement) && !toolbarStillFocused) renderChannels(lastData.channels || [], lastData.config || {}, false);
-        }, 1500);
-      }
-    }
-  }
-
-  function render(d) {
-    lastData = d;
-    document.getElementById("sChannels").textContent = d.stats.total_channels;
-    document.getElementById("sOnline").textContent = d.stats.online_channels;
-    document.getElementById("sRec").textContent = d.stats.active_recordings;
-    document.getElementById("sPreview").textContent = d.stats.active_previews ?? 0;
-    document.getElementById("sFiles").textContent = d.stats.total_files;
-    document.getElementById("sSize").textContent = d.stats.total_size_human;
-    document.getElementById("recTotalSize").textContent = d.stats.total_size_human;
-    document.getElementById("bulkBtns").style.display = d.channels.length?"":"none";
-
-    const ms = d.stats.monitor_state || (d.stats.monitor_alive ? "ok" : "stopped");
-    const msBadge = document.getElementById("monitorStateBadge");
-    msBadge.className = "monitor-status" + (ms === "degraded" ? " degraded" : ms === "stopped" ? " stopped" : "");
-    msBadge.innerHTML = ms === "ok"
-      ? '<i class="bi bi-check-circle-fill"></i> Monitor operativo'
-      : ms === "degraded"
-        ? '<i class="bi bi-exclamation-triangle-fill"></i> Monitor rallentato'
-        : '<i class="bi bi-x-circle-fill"></i> Monitor fermo';
-    const lastCycle = d.stats.monitor_last_cycle == null ? "in attesa del primo esito" : `ultimo controllo completato ${uptime(d.stats.monitor_last_cycle)} fa`;
-    document.getElementById("monitorDetails").textContent = `${lastCycle} · worker max ${d.stats.monitor_workers} · richieste in corso ${d.stats.monitor_inflight}${d.stats.monitor_inflight_oldest ? ` (più vecchia: ${uptime(d.stats.monitor_inflight_oldest)})` : ""}`;
-
-    if (d.config) {
-      document.getElementById("configTags").innerHTML = [
-        d.config.notify_type!=='none'?`<span class="config-tag on">${esc(d.config.notify_type.toUpperCase())}</span>`:'',
-        d.config.auto_convert?'<span class="config-tag on" title="Remux automatico dei TS conclusi in MP4, senza ricodifica">MP4 AUTO</span>':'',
-        d.config.auto_convert && d.config.delete_after_convert?'<span class="config-tag" title="Il TS viene eliminato solo dopo una conversione MP4 riuscita">TS ELIMINATO DOPO MP4</span>':'',
-        d.config.dedup_enabled?'<span class="config-tag on" title="Deduplicazione attiva sui file conclusi">DEDUP</span>':'',
-        '<span class="config-tag" title="La pausa normale mantiene attivo il monitor; la luna sospende i controlli del singolo canale">PAUSA = MONITOR ATTIVO · LUNA = MONITOR SOSPESO</span>',
-      ].join('');
-    }
-
-    document.getElementById("diskUsed").textContent = d.disk.used_human;
-    document.getElementById("diskTotal").textContent = d.disk.total_human;
-    document.getElementById("diskFree").textContent = d.disk.free_human;
-    const fill = document.getElementById("diskFill");
-    fill.style.width = d.disk.used_pct+"%";
-    fill.style.background = d.disk.used_pct>90?"var(--rec)":d.disk.used_pct>75?"#fbbf24":"var(--tw)";
-
-    platforms = d.platforms||platforms;
-    const platSel = document.getElementById("addPlatform");
-    if (platSel && !platSel.options.length && platforms.length) {
-      platforms.forEach(p => { const o=document.createElement("option"); o.value=p.key; o.textContent=p.label; platSel.appendChild(o); });
-    }
-
-    qualityOpts = d.quality_options||[];
-
-    renderChannels(d.channels || [], d.config || {});
-
-    renderRecordings(d.recordings || []);
-  }
-
-  // Aggiorna le righe delle registrazioni in modo incrementale: niente rebuild dell'intera lista
-  // ad ogni evento SSE, così il DOM, i pulsanti e la posizione di scroll restano stabili.
-  function createRecordingRow() {
-    const row = document.createElement("div");
-    row.className = "rec-item";
-
-    const info = document.createElement("div"); info.className = "rec-info";
-    const name = document.createElement("span"); name.className = "rec-name";
-    const nameText = document.createTextNode(""); name.appendChild(nameText);
-    const badge = document.createElement("span");
-    badge.className = "badge-sm badge-rec"; badge.style.cssText = "margin-left:6px;font-size:.55rem";
-    const dot = document.createElement("span"); dot.className = "dot-rec"; dot.style.cssText = "width:4px;height:4px";
-    badge.appendChild(dot); badge.appendChild(document.createTextNode("REC")); badge.style.display = "none";
-    name.appendChild(badge);
-    const meta = document.createElement("span"); meta.className = "rec-meta";
-    info.append(name, meta);
-
-    const actions = document.createElement("div"); actions.className = "rec-actions";
-    const downloadBox = document.createElement("div"); downloadBox.className = "rec-btn";
-    const link = document.createElement("a"); link.download = "";
-    const downloadIcon = document.createElement("i"); downloadIcon.className = "bi bi-download";
-    link.appendChild(downloadIcon); downloadBox.appendChild(link);
-    const remove = document.createElement("div"); remove.className = "rec-btn del";
-    const removeIcon = document.createElement("i"); removeIcon.className = "bi bi-trash3"; remove.appendChild(removeIcon);
-    remove.addEventListener("click", () => {
-      if (row.dataset.inUse === "true") return;
-      window.confirmDeleteFile(row.dataset.filename || "");
-    });
-    actions.append(downloadBox, remove); row.append(info, actions);
-    row._nameText = nameText; row._badge = badge; row._meta = meta;
-    row._link = link; row._remove = remove; row._removeIcon = removeIcon;
-    return row;
-  }
-
-  function renderRecordings(files) {
-    const list = document.getElementById("recList");
-    if (!files.length) {
-      for (const row of recordingRows.values()) row.remove();
-      recordingRows.clear();
-      if (!list.querySelector(".empty-state")) list.innerHTML = '<div class="empty-state"><i class="bi bi-inbox"></i><p>Nessuna registrazione</p></div>';
-      return;
-    }
-    const empty = list.querySelector(".empty-state"); if (empty) empty.remove();
-    const seen = new Set();
-    files.forEach((file, index) => {
-      seen.add(file.name);
-      let row = recordingRows.get(file.name);
-      if (!row) { row = createRecordingRow(); recordingRows.set(file.name, row); }
-      row.dataset.filename = file.name;
-      row.dataset.inUse = file.in_use ? "true" : "false";
-      row._nameText.nodeValue = file.name;
-      row._badge.style.display = file.in_use ? "inline-flex" : "none";
-      row._meta.textContent = `${file.size_human} · ${file.modified}`;
-      row._link.href = `/recordings/${encodeURIComponent(file.name)}`;
-      row._remove.className = "rec-btn" + (file.in_use ? "" : " del");
-      row._remove.title = file.in_use ? "In registrazione" : "Elimina registrazione";
-      row._remove.style.opacity = file.in_use ? ".3" : "";
-      row._remove.style.cursor = file.in_use ? "not-allowed" : "pointer";
-      row._removeIcon.className = file.in_use ? "bi bi-lock-fill" : "bi bi-trash3";
-      const current = list.children[index];
-      if (current !== row) list.insertBefore(row, current || null);
-    });
-    for (const [name, row] of recordingRows) {
-      if (!seen.has(name)) { row.remove(); recordingRows.delete(name); }
-    }
-  }
-
-  // ── SSE ──
-  function setSseStatus(s) {
-    const dot=document.getElementById("sseDot"), lbl=document.getElementById("sseLabel");
-    dot.className="sse-dot";
-    if(s==="connected")lbl.textContent="Live";
-    else if(s==="connecting"){dot.classList.add("connecting");lbl.textContent="Connessione…";}
-    else{dot.classList.add("disconnected");lbl.textContent="Disconnesso";}
-  }
-  let authProbeInFlight = false;
-  async function checkSessionAfterSseError() {
-    if (authProbeInFlight) return;
-    authProbeInFlight = true;
-    try {
-      const response = await fetch("/api/status", {credentials:"same-origin", cache:"no-store"});
-      if (response.status === 401) goToLogin();
-    } catch (_) {
-      // Un errore di rete non significa che la sessione sia scaduta: il reconnect SSE riprova.
-    } finally { authProbeInFlight = false; }
-  }
-  function connectSSE() {
-    if(evtSource)evtSource.close(); setSseStatus("connecting");
-    evtSource=new EventSource("/api/stream");
-    ["status","update","cycle_complete","action"].forEach(e=>evtSource.addEventListener(e,ev=>{try{render(JSON.parse(ev.data));setSseStatus("connected");}catch{}}));
-    evtSource.onopen=()=>setSseStatus("connected");
-    evtSource.onerror=()=>{setSseStatus("disconnected");evtSource.close();void checkSessionAfterSseError();if(reconnectTimer)clearTimeout(reconnectTimer);reconnectTimer=setTimeout(connectSSE,3000);};
-  }
-
-  // ── Actions (AJAX) ──
-  document.getElementById("addForm").addEventListener("submit", async e => {
-    e.preventDefault();
-    const ch=document.getElementById("addChannel").value.trim(), q=document.getElementById("addQuality").value;
-    const plat=document.getElementById("addPlatform").value||"twitch";
-    if(!ch)return;
-    const r=await api("/api/room",{action:"add",channel:ch,quality:q,platform:plat});
-    toast(r.msg||(r.ok?"Aggiunto":"Errore"),r.ok?"success":"warning");
-    if(r.ok)document.getElementById("addChannel").value="";
-  });
-
-  window.chAction=async(action,name,platform)=>{const r=await api("/api/room",{action,channel:name,platform});if(!r.ok)toast(r.msg||"Operazione non riuscita","warning");return r;};
-  window.toggleSleep=async(name,platform)=>{const r=await api("/api/room",{action:"toggle_sleep",channel:name,platform});toast(r.msg||(r.ok?"Stato sonno aggiornato":"Errore"),r.ok?"success":"warning");return r;};
-  window.toggleSingleLive=async(name,platform)=>{const r=await api("/api/room",{action:"toggle_single_live",channel:name,platform});toast(r.msg||(r.ok?"Modalità Una volta aggiornata":"Errore"),r.ok?"success":"warning");return r;};
-  window.setQuality=async(name,q,platform)=>api("/api/room",{action:"set_quality",channel:name,quality:q,platform});
-  window.bulkAction=async(action)=>api("/api/room",{action});
-  window.forceCheck=async(name,platform)=>{await api("/api/check",{channel:name});toast("Controllo prioritario accodato");};
-  window.forceCheckAll=async()=>{const r=await api("/api/check",{});toast(`Controlli prioritari accodati: ${r.queued||0}`);};
-
-  // ── Player live indipendente dalla registrazione ──
-  let _mts=null;
-  let _livePlayback=null;
-  function _previewStatus(text,show){const s=document.getElementById("previewStatus");document.getElementById("previewStatusText").textContent=text||"";s.style.display=show?"flex":"none";}
-  function _clearLiveTimer(state,key){if(state&&state[key]){clearTimeout(state[key]);state[key]=null;}}
-  function _endLivePlayback(){
-    const state=_livePlayback;
-    if(state){
-      state.closed=true;
-      for(const key of ["retryTimer","stallTimer","stableTimer"])_clearLiveTimer(state,key);
-    }
-    _livePlayback=null;
-  }
-  function _destroyPlayer(){
-    const vid=document.getElementById("previewVideo");
-    vid.onloadedmetadata=vid.onplaying=vid.onerror=vid.onended=vid.onwaiting=vid.ontimeupdate=null;
-    if(_mts){const previous=_mts;_mts=null;try{previous.destroy();}catch{}}
-    try{vid.pause();vid.removeAttribute("src");vid.load();}catch{}
-  }
-  function _scheduleLiveReconnect(state,reason){
-    if(!state||_livePlayback!==state||state.closed||state.retryPending)return;
-    _clearLiveTimer(state,"stallTimer");
-    _clearLiveTimer(state,"stableTimer");
-    if(state.retryCount>=state.maxRetries){
-      state.failed=true;
-      _destroyPlayer();
-      _previewStatus("La preview si è interrotta. Chiudi il player e premi «Guarda live» per riprovare.",true);
-      return;
-    }
-    state.retryCount++;
-    state.retryPending=true;
-    const delay=Math.min(15000,1500*Math.pow(2,state.retryCount-1));
-    _previewStatus(`Interruzione temporanea${reason ? " (" + reason + ")" : ""}: riconnessione ${state.retryCount}/${state.maxRetries} tra ${Math.ceil(delay/1000)} s…`,true);
-    state.retryTimer=setTimeout(()=>{
-      if(_livePlayback!==state||state.closed)return;
-      state.retryPending=false;
-      _attachLiveSource(state);
-    },delay);
-  }
-  function _attachLiveSource(state){
-    if(!state||_livePlayback!==state||state.closed)return;
-    _destroyPlayer();
-    const vid=document.getElementById("previewVideo");
-    state.lastProgress=Date.now();
-    state.hasPlayed=false;
-    const markProgress=()=>{
-      state.lastProgress=Date.now();
-      _clearLiveTimer(state,"stallTimer");
-    };
-    vid.onplaying=()=>{
-      markProgress();
-      // Se il player ha recuperato da solo dopo un gap pubblicitario, annulla
-      // il retry già pianificato per non riaprire inutilmente il flusso.
-      if(state.retryPending){
-        _clearLiveTimer(state,"retryTimer");state.retryPending=false;state.retryCount=0;
-        _clearLiveTimer(state,"stableTimer");
-      }
-      state.hasPlayed=true;
-      state.failed=false;
-      _previewStatus("",false);
-      if(state.retryCount>0&&!state.stableTimer){
-        state.stableTimer=setTimeout(()=>{
-          if(_livePlayback===state&&!state.closed){state.retryCount=0;state.stableTimer=null;}
-        },120000);
-      }
-    };
-    vid.ontimeupdate=markProgress;
-    vid.onwaiting=()=>{
-      if(!state.hasPlayed||state.stallTimer||state.retryPending)return;
-      state.stallTimer=setTimeout(()=>{
-        state.stallTimer=null;
-        if(_livePlayback===state&&!state.closed&&state.hasPlayed&&Date.now()-state.lastProgress>=105000){
-          _scheduleLiveReconnect(state,"flusso fermo, possibile interruzione pubblicitaria");
-        }
-      },110000);
-    };
-    vid.onerror=()=>_scheduleLiveReconnect(state,"errore del player");
-    vid.onended=()=>_scheduleLiveReconnect(state,"flusso terminato");
-    const play=()=>vid.play().catch(()=>_previewStatus("Premi Play nel video per avviare.",true));
-    if(window.mpegts&&mpegts.isSupported()){
-      const player=mpegts.createPlayer({type:"mpegts",isLive:true,url:state.url},
-        {lazyLoad:false, lazyLoadMaxDuration:60, lazyLoadRecoverDuration:20,
-         enableStashBuffer:true, stashInitialSize:384*1024,
-         liveBufferLatencyChasing:false, fixAudioTimestampGap:true,
-         autoCleanupSourceBuffer:true, autoCleanupMaxBackwardDuration:30,
-         autoCleanupMinBackwardDuration:15});
-      _mts=player;
-      player.attachMediaElement(vid);
-      player.on(mpegts.Events.ERROR,(_type,detail)=>{
-        if(_mts!==player)return;
-        _scheduleLiveReconnect(state,detail?String(detail).toLowerCase().replaceAll("_"," "):"errore di decodifica");
-      });
-      player.load();
-      play();
-    }else{
-      _previewStatus("Questo browser non supporta la diretta. Prova un browser con supporto Media Source Extensions.",true);
-    }
-  }
-  function openPlayer(title,url,isLive,isTs){
-    _endLivePlayback();
-    _destroyPlayer();
-    const vid=document.getElementById("previewVideo");
-    document.getElementById("previewTitle").textContent=title;
-    document.getElementById("previewNote").textContent=isLive
-      ?"Flusso live indipendente dalla registrazione. Durante un'interruzione pubblicitaria il player attende il ritorno del flusso e tenta la riconnessione automatica. Nessun file aggiuntivo viene creato."
-      :"Riproduzione della registrazione. Se il formato non è supportato dal browser, scarica il file.";
-    document.getElementById("previewModal").classList.add("open");
-    _previewStatus("Caricamento…",true);
-    const error=isLive?"Flusso live non disponibile. Verifica che la diretta sia online e riprova.":"Impossibile riprodurre nel browser — usa il download.";
-    if(isLive){
-      const state={url,title,retryCount:0,maxRetries:7,retryPending:false,retryTimer:null,stallTimer:null,stableTimer:null,closed:false,failed:false,lastProgress:Date.now(),hasPlayed:false};
-      _livePlayback=state;
-      _attachLiveSource(state);
-      return;
-    }
-    const play=()=>vid.play().catch(()=>_previewStatus("Premi Play nel video per avviare.",true));
-    vid.onplaying=()=>_previewStatus("",false);
-    vid.onerror=()=>_previewStatus(error,true);
-    vid.onended=()=>_previewStatus(error,true);
-    if(isTs && window.mpegts && mpegts.isSupported()){
-      _mts=mpegts.createPlayer({type:"mpegts",isLive:false,url},
-        {lazyLoad:true, lazyLoadMaxDuration:60, lazyLoadRecoverDuration:20,
-         enableStashBuffer:true, stashInitialSize:384*1024,
-         liveBufferLatencyChasing:false, fixAudioTimestampGap:true,
-         autoCleanupSourceBuffer:false, autoCleanupMaxBackwardDuration:30,
-         autoCleanupMinBackwardDuration:15});
-      _mts.attachMediaElement(vid);
-      _mts.on(mpegts.Events.ERROR,()=>_previewStatus(error,true));
-      _mts.load();
-      play();
-    }else{
-      vid.onloadedmetadata=play;
-      vid.src=url;
-    }
-  }
-  window.openLive=(name,platform)=>openPlayer(name+" • LIVE","/live/"+encodeURIComponent(platform||"twitch")+"/"+encodeURIComponent(name),true,true);
-  window.closePreview=()=>{
-    _endLivePlayback();
-    _destroyPlayer();
-    document.getElementById("previewModal").classList.remove("open");
-  };
-  document.getElementById("previewModal").addEventListener("click",e=>{if(e.target.id==="previewModal")closePreview();});
-  document.addEventListener("keydown",e=>{if(e.key==="Escape"&&document.getElementById("previewModal").classList.contains("open"))closePreview();});
-
-  window.confirmRemoveCh=(name,platform)=>{_pendingRemove=name;_pendingRemovePlat=platform;document.getElementById("confirmChName").textContent=name;document.getElementById("confirmRemove").classList.add("open");};
-  document.getElementById("confirmRemoveBtn").addEventListener("click",async()=>{if(!_pendingRemove)return;await api("/api/room",{action:"remove",channel:_pendingRemove,platform:_pendingRemovePlat});_pendingRemove="";closeConfirm("confirmRemove");});
-
-  window.confirmDeleteFile=name=>{_pendingDelete=name;document.getElementById("confirmFileName").textContent=name;document.getElementById("confirmDelete").classList.add("open");};
-  document.getElementById("confirmDeleteBtn").addEventListener("click",async()=>{if(!_pendingDelete)return;const r=await api("/api/delete_recording",{filename:_pendingDelete});if(!r.ok)toast(r.msg||"Errore","danger");_pendingDelete="";closeConfirm("confirmDelete");});
-
-  window.closeConfirm=id=>document.getElementById(id).classList.remove("open");
-  window.openImport=()=>document.getElementById("importModal").classList.add("open");
-
-  document.getElementById("importFile").addEventListener("change",async function(){
-    const file=this.files[0]; if(!file)return;
-    const res=document.getElementById("importResult");
-    try{const fd=new FormData();fd.append("file",file);fd.append("update_existing_quality",document.getElementById("importUpdateExistingQuality")?.checked?"true":"false");const csrf=document.querySelector('meta[name="csrf-token"]')?.content||'';const r=await fetch("/api/import",{method:"POST",headers:{"X-CSRF-Token":csrf},body:fd});if(r.status===401){goToLogin();return;}const d=await r.json();if(r.ok){res.className="import-result ok";res.textContent=`Importati ${d.imported} nuovi, ${d.updated||0} qualità aggiornate, ${d.skipped} saltati.`;setTimeout(()=>closeConfirm("importModal"),3500);}else{res.className="import-result err";res.textContent=d.error||"Errore";}}
-    catch(e){res.className="import-result err";res.textContent="Errore: "+e.message;}
-    this.value="";
-    const updateQualityCheckbox=document.getElementById("importUpdateExistingQuality");if(updateQualityCheckbox)updateQualityCheckbox.checked=false;
-  });
-
-  document.addEventListener("keydown",e=>{if(e.key==="Escape"){closeConfirm("confirmRemove");closeConfirm("confirmDelete");closeConfirm("importModal");}});
-  ["confirmRemove","confirmDelete","importModal"].forEach(id=>document.getElementById(id).addEventListener("click",e=>{if(e.target.id===id)closeConfirm(id);}));
-
-  if(typeof EventSource!=="undefined"){connectSSE();setInterval(async()=>{try{const r=await fetch("/api/status");if(r.status===401){goToLogin();return;}if(r.ok)render(await r.json());}catch{}},30000);}
-  else{(async()=>{try{const r=await fetch("/api/status");if(r.status===401){goToLogin();return;}if(r.ok)render(await r.json());}catch{}})();setInterval(async()=>{try{const r=await fetch("/api/status");if(r.status===401){goToLogin();return;}if(r.ok)render(await r.json());}catch{}},8000);}
-})();
-</script>
+<script src="{{ url_for('static', filename='app.js', v=static_v) }}" defer></script>
 </body>
 </html>

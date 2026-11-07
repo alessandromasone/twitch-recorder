@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+import sys, json, os, time
+args = sys.argv[1:]
+if "--version" in args:
+    if "--twitch-disable-ads" in args: sys.exit(2)
+    print("streamlink 8.6.1"); sys.exit(0)
+url = next((a for a in args if a.startswith("http")), "")
+name = url.rstrip("/").split("/")[-1]
+live = name.startswith("live")
+if "--json" in args:
+    if live:
+        print(json.dumps({"plugin":"twitch","metadata":{"id":"1","author":name,"category":"Just Chatting","title":json.loads(os.environ.get("FAKE_TITLES","{}")).get(name,"Titolo di "+name)},"streams":{"720p":{},"best":{}}}))
+    else:
+        print(json.dumps({"error":"No playable streams found on this URL: "+url})); sys.exit(1)
+    sys.exit(0)
+if "--stdout" in args:
+    if not live:
+        print("error: No playable streams found", file=sys.stderr); sys.exit(1)
+    q = args[-1].split(",")[0]
+    print(f"[cli][info] Opening stream: {q} (hls)", file=sys.stderr, flush=True)
+    src = os.environ.get("FAKE_TS")
+    with open(src, "rb") as fh:
+        data = fh.read()
+    out = sys.stdout.buffer
+    try:
+        while True:
+            for i in range(0, len(data), 188*700):
+                out.write(data[i:i+188*700]); out.flush(); time.sleep(0.25)
+    except (BrokenPipeError, KeyboardInterrupt):
+        pass

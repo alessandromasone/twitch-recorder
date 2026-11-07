@@ -1,3 +1,18 @@
+Versione preview — riorganizzazione completa, interfaccia nuova, rerun non dichiarate
+
+- Codice diviso in moduli (pacchetto twrec/): configurazione, stato, controlli, monitor, recorder, preview, rerun, file, SSE, API. Variabili .env e API esistenti restano compatibili.
+- Controlli Twitch tramite Helix in blocco (una richiesta ogni 100 canali) quando sono configurate TWITCH_CLIENT_ID e TWITCH_CLIENT_SECRET; TWITCH_CHECK_METHOD=streamlink ripristina il metodo precedente.
+- Avvio REC senza sonda della qualità: Streamlink riceve una lista di fallback e la qualità aperta viene letta dal log.
+- SSE incrementale (solo canali cambiati), indice delle registrazioni in cache, statistiche disco in cache, salvataggio di channels.json raggruppato; nessun calcolo senza client collegati.
+- Preview condivisa: un solo processo per canale indipendentemente dagli spettatori; la sorgente temporanea si chiude dopo PREVIEW_LINGER_SECONDS; all'avvio della REC la preview passa al flusso condiviso.
+- Rilevamento rerun con punteggio 0-100 (tag, parole chiave, titoli e VOD già trasmessi, categoria, spettatori, orario), politica per canale (mark/skip/record), correzione manuale e titoli ignorati. Storico in channel_history.json.
+- SKIP_RERUNS senza credenziali non blocca più le registrazioni: usa il titolo restituito da Streamlink.
+- Nuova interfaccia senza Bootstrap: multiview «In onda» con miniature e tally, righe compatte, pannello di dettaglio per canale, selezione multipla, filtri con contatori, ricerca per titolo e gioco, registrazioni per giorno con miniature, durata, titolo e badge rerun, player in finestra con mpegts.js caricato solo quando serve, tema chiaro/scuro, layout a schede su mobile.
+- Miniature: fotogramma dal flusso REC già in memoria, CDN Twitch fuori REC, miniature dei file conclusi generate una volta.
+- Docker: gunicorn con 32 thread (ogni SSE e preview occupa un thread), compose con le nuove variabili e con quelle delle notifiche.
+- I segmenti vuoti (< 4 KB) vengono eliminati.
+- 23 test pytest con uno Streamlink finto; verificati REC, cambio qualità, preview condivisa e temporanea e interfaccia su desktop, mobile e tema chiaro. Non provato con dirette Twitch reali né con l'API Helix reale.
+
 Versione aggiornata — selezione qualità coerente e import configurazione esistente
 
 - Corretto il fallback qualità: cerca prima una variante alla stessa altezza video (FPS alternativi) prima di scendere di risoluzione; se non esistono varianti inferiori, considera quella superiore più vicina.
