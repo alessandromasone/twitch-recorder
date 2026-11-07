@@ -268,8 +268,15 @@
     if (!ch.frame_url || isMinimal()) return "";
     return `${ch.frame_url}?t=${Math.floor(Date.now() / 90000)}`;
   }
+  const coversOff = () => document.documentElement.classList.contains("covers-off");
+  // Con il pulsante occhio attivo i titoli delle live non vengono mostrati (neanche nei suggerimenti).
+  const T = (text) => (text && coversOff() ? "Titolo nascosto" : text);
   function avatarHtml(ch) {
-    return ch.avatar && !isMinimal() ? `<img src="${esc(ch.avatar)}" alt="" loading="lazy">` : esc((ch.display_name || ch.name).slice(0, 1).toUpperCase());
+    const letter = esc((ch.display_name || ch.name).slice(0, 1).toUpperCase());
+    // Icona del canale; la lettera compare se l'icona manca, non si carica o le copertine sono nascoste.
+    return ch.avatar && !isMinimal() && !coversOff()
+      ? `<img src="${esc(ch.avatar)}" alt="" loading="lazy" onerror="this.replaceWith(document.createTextNode('${letter}'))">`
+      : letter;
   }
   const platTag = (ch) => `<span class="plat plat-${esc(ch.platform)}" title="${esc(ch.platform_label)}">${esc(ch.platform_short)}</span>`;
 
@@ -350,8 +357,9 @@
     a.href = ch.home_url; setText(a, ch.display_name || ch.name);
     setHtml(el.querySelector(".plat-slot"), platTag(ch));
     const title = el.querySelector(".mon-title");
-    setText(title, ch.title || (ch.actually_recording ? "Registrazione in corso" : "In onda"));
-    title.title = ch.title || "";
+    setText(title, T(ch.title) || (ch.actually_recording ? "Registrazione in corso" : "In onda"));
+    title.title = T(ch.title) || "";
+    title.classList.toggle("is-hidden-title", !!ch.title && coversOff());
     const sub = [];
     if (ch.game) sub.push(esc(ch.game));
     if (ch.resolved_quality && ch.actually_recording) sub.push(esc(ch.resolved_quality === ch.quality ? ch.resolved_quality : `${ch.resolved_quality} (richiesta ${ch.quality})`));
@@ -404,7 +412,7 @@
       const tag = ch.actually_recording
         ? `<span class="live-tag rec">REC <span data-since="${ch.rec_started_at || ""}">${duration(serverNow() - (ch.rec_started_at || serverNow()))}</span></span>`
         : `<span class="live-tag">${ch.last_check_result === "rerun" ? "RERUN" : "LIVE"}</span>`;
-      const parts = [ch.title ? `<span class="live-title" title="${esc(ch.title)}">${esc(ch.title)}</span>` : "",
+      const parts = [ch.title ? `<span class="live-title" title="${esc(T(ch.title))}">${esc(T(ch.title))}</span>` : "",
         ch.game ? `<span class="live-game">${esc(ch.game)}</span>` : "", ch.viewers != null ? `<span>${compact(ch.viewers)}</span>` : "",
         level ? `<span class="warn">${level === "confirmed" ? "rerun" : "rerun?"}</span>` : ""].join("");
       setHtml(el.querySelector(".row-status"), `${tag}${parts}`);
@@ -431,7 +439,7 @@
     else if (ch.last_status === "unknown" || ch.last_check_result === "checking") { state = "verifica"; cls = "m-off"; }
     else { state = ch.is_recording ? "offline" : "in pausa"; cls = "m-off"; }
     if (isOnAir(ch)) {
-      info = [ch.title ? `<span class="m-title" title="${esc(ch.title)}">${esc(ch.title)}</span>` : "",
+      info = [ch.title ? `<span class="m-title" title="${esc(T(ch.title))}">${esc(T(ch.title))}</span>` : "",
         ch.game ? `<span class="m-meta">${esc(ch.game)}</span>` : "",
         ch.viewers != null ? `<span class="m-meta">${compact(ch.viewers)}</span>` : "",
         level ? `<span class="m-cue">${level === "confirmed" ? "rerun" : "rerun?"}</span>` : ""].join("");
@@ -508,7 +516,7 @@
   }
   function updateRecNode(el, r) {
     const ch = S.channels.get(r.channel);
-    const sig = JSON.stringify([r.in_use, r.title, r.game, r.rerun?.level, r.in_use ? 0 : r.duration, ch?.display_name, isMinimal()]);
+    const sig = JSON.stringify([r.in_use, r.title, r.game, r.rerun?.level, r.in_use ? 0 : r.duration, ch?.display_name, ch?.avatar, isMinimal(), coversOff()]);
     if (el._sig !== sig) {
       el._sig = sig;
       const started = new Date(r.order_ts * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
@@ -520,7 +528,7 @@
         <button class="rec-thumb ${r.in_use ? "live" : ""}" type="button" data-act="play-file" aria-label="Riproduci ${esc(r.name)}">${recThumbHtml(r, ch)}${dur}</button>
         <div class="rec-info">
           <div class="rec-channel">${r.in_use ? '<span class="rec-live">REC</span>' : ""}${esc(ch?.display_name || r.channel)}${cue}</div>
-          <div class="rec-title" title="${esc(r.title || r.name)}">${esc(r.title || r.name)}</div>
+          <div class="rec-title" title="${esc(T(r.title) || r.name)}">${esc(T(r.title) || r.name)}</div>
           <div class="rec-meta"><span>${started}</span><span data-size></span>${r.game ? `<span>${esc(r.game)}</span>` : ""}</div>
         </div>
         <div class="rec-actions">
@@ -620,7 +628,7 @@
       <div class="group">
         <dl class="kv">
           <dt>Stato</dt><dd>${st.html}</dd>
-          ${ch.title ? `<dt>Titolo</dt><dd>${esc(ch.title)}</dd>` : ""}
+          ${ch.title ? `<dt>Titolo</dt><dd>${esc(T(ch.title))}</dd>` : ""}
           ${ch.game ? `<dt>Categoria</dt><dd>${esc(ch.game)}</dd>` : ""}
           ${ch.viewers != null ? `<dt>Spettatori</dt><dd>${ch.viewers}</dd>` : ""}
           ${ch.actually_recording ? `<dt>In REC da</dt><dd><span data-since="${ch.rec_started_at}">${duration(serverNow() - ch.rec_started_at)}</span></dd><dt>File</dt><dd>${esc(ch.current_file || "")}</dd>` : ""}
@@ -763,6 +771,7 @@
   function pStatus(text, { error = false, retry = false } = {}) {
     const box = $("#playerStatus");
     box.hidden = !text;
+    $("#pcBig").hidden = !!text;
     box.classList.toggle("error", error);
     $("#playerStatusText").textContent = text || "";
     $("#playerRetry").hidden = !retry;
@@ -796,7 +805,10 @@
     const needsMpegts = src.live || src.ts;
     if (needsMpegts) {
       if (!window.mpegts || !mpegts.isSupported()) {
-        pStatus("Questo browser non supporta la riproduzione MPEG-TS (serve Media Source Extensions).", { error: true });
+        const ios = /iPhone|iPod/.test(navigator.userAgent);
+        pStatus(ios
+          ? "Su iPhone serve iOS 17.1 o successivo per guardare la diretta qui. Puoi aprirla nell'app della piattaforma con il pulsante in basso."
+          : "Questo browser non supporta la riproduzione MPEG-TS (serve Media Source Extensions).", { error: true });
         return;
       }
       const m = mpegts.createPlayer(
@@ -826,9 +838,18 @@
     }
     pStatus("Caricamento…");
     P.lastTime = -1; P.idleSince = Date.now();
-    v.play().catch(() => { pStatus(""); pSync(); });
+    pAutoplay(v);
     clearInterval(P.timers.watch);
     if (src.live) P.timers.watch = setInterval(pWatchdog, 2000);
+  }
+
+  function pAutoplay(v) {
+    v.play().catch(() => {
+      // Telefoni e alcuni browser bloccano l'avvio con audio: si riparte muti con l'invito a toccare.
+      if (v.muted) { pStatus(""); pSync(); return; }
+      v.muted = true;
+      v.play().then(() => { $("#pcUnmute").hidden = false; }).catch(() => { pStatus(""); pSync(); });
+    });
   }
 
   // Se il video resta fermo (nessun avanzamento) per 15 s mentre dovrebbe suonare, si riconnette.
@@ -860,6 +881,8 @@
   function pSync() {
     const v = P.v(), src = P.src;
     if (!src) return;
+    P.el().classList.toggle("paused", v.paused);
+    if (!v.muted) $("#pcUnmute").hidden = true;
     $("#pcPlay").innerHTML = icon(v.paused ? "play" : "pause");
     $("#pcPlay").setAttribute("aria-label", v.paused ? "Riproduci" : "Pausa");
     const muted = v.muted || v.volume === 0;
@@ -880,11 +903,19 @@
     }
   }
 
+  function pTitle() {
+    const src = P.src;
+    if (!src) return;
+    $("#playerTitle").textContent = src.realTitle && coversOff() ? "Titolo nascosto" : src.title;
+    $("#playerAvatar").innerHTML = src.channel ? (isMinimal() ? "" : avatarHtml(src.channel)) : "";
+    $("#playerAvatar").hidden = !src.channel || isMinimal();
+  }
+
   function pShowControls() {
     const el = P.el();
     el.classList.remove("idle");
     clearTimeout(P.timers.idle);
-    P.timers.idle = setTimeout(() => { if (!P.v().paused && !el.matches(":focus-within .pc *")) el.classList.add("idle"); }, 2500);
+    P.timers.idle = setTimeout(() => { if (!P.v().paused && !el.matches(":focus-within .pc *")) el.classList.add("idle"); }, lastPointer === "mouse" ? 2500 : 3500);
   }
 
   async function openPlayer(src) {
@@ -892,10 +923,9 @@
     P.src = src; P.tries = 0;
     const el = P.el();
     el.classList.toggle("is-live", !!src.live);
-    $("#playerTitle").textContent = src.title;
+    pTitle();
     $("#playerSub").innerHTML = src.sub || "";
-    $("#playerAvatar").innerHTML = src.avatar || "";
-    $("#playerAvatar").hidden = !src.avatar;
+    pTitle();
     const ext = $("#playerExternal");
     ext.hidden = !src.external; if (src.external) ext.href = src.external;
     const dl = $("#playerDownload");
@@ -903,6 +933,8 @@
     $("#pcSeek").value = 0;
     el.classList.add("open");
     el.setAttribute("aria-hidden", "false");
+    document.body.classList.add("player-open");
+    $("#pcUnmute").hidden = true;
     pShowControls();
     pStatus("Caricamento…");
     if (src.live || src.ts) {
@@ -922,7 +954,11 @@
     P.src = null;
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
-    if (!silent) { P.el().classList.remove("open"); P.el().setAttribute("aria-hidden", "true"); }
+    if (!silent) {
+      P.el().classList.remove("open");
+      P.el().setAttribute("aria-hidden", "true");
+      document.body.classList.remove("player-open");
+    }
   }
 
   function watch(name) {
@@ -934,8 +970,9 @@
       live: true,
       url: `/live/${encodeURIComponent(ch.platform)}/${encodeURIComponent(ch.name)}`,
       title: ch.title || ch.display_name || ch.name,
+      realTitle: ch.title,
       sub: `<b>${esc(ch.display_name || ch.name)}</b>${meta.map((m) => `<span>${esc(m)}</span>`).join("")}`,
-      avatar: isMinimal() ? "" : avatarHtml(ch),
+      channel: ch,
       external: ch.home_url,
       since: tsSeconds(ch.stream_started_at) || ch.rec_started_at || null,
     });
@@ -949,8 +986,9 @@
       url: `/recordings/${encodeURIComponent(file)}`,
       download: `/recordings/${encodeURIComponent(file)}?dl=1`,
       title: r?.title || file,
+      realTitle: r?.title,
       sub: `<b>${esc(ch?.display_name || r?.channel || "")}</b><span>${esc(when)}</span>${r?.game ? `<span>${esc(r.game)}</span>` : ""}`,
-      avatar: isMinimal() || !ch ? "" : avatarHtml(ch),
+      channel: ch || null,
       duration: r?.duration || 0,
     });
   }
@@ -958,11 +996,24 @@
   // Controlli
   const pv = () => P.v();
   $("#pcPlay").addEventListener("click", () => { const v = pv(); if (v.paused) v.play().catch(() => {}); else v.pause(); });
+  let lastPointer = "mouse";
+  $("#playerStage").addEventListener("pointerdown", (e) => { lastPointer = e.pointerType || "mouse"; }, true);
   $("#playerStage").addEventListener("click", (e) => {
-    if (e.target.closest(".pc, .player-status")) return;
+    if (e.target.closest(".pc, .player-status, .pc-big, .pc-unmute")) return;
+    if (lastPointer !== "mouse") {
+      // Sul telefono un tocco mostra o nasconde i controlli; play e pausa hanno i loro pulsanti.
+      const el = P.el();
+      if (el.classList.contains("idle")) pShowControls(); else { clearTimeout(P.timers.idle); el.classList.add("idle"); }
+      return;
+    }
     const v = pv(); if (v.paused) v.play().catch(() => {}); else v.pause();
   });
-  $("#playerStage").addEventListener("dblclick", (e) => { if (!e.target.closest(".pc")) toggleFullscreen(); });
+  $("#playerStage").addEventListener("dblclick", (e) => { if (lastPointer === "mouse" && !e.target.closest(".pc")) toggleFullscreen(); });
+  $("#pcBig").addEventListener("click", () => { pv().play().catch(() => {}); pShowControls(); });
+  $("#pcUnmute").addEventListener("click", () => {
+    const v = pv(); v.muted = false; if (v.volume === 0) v.volume = 0.8;
+    store.set("tr-muted", "0"); $("#pcUnmute").hidden = true;
+  });
   $("#pcMute").addEventListener("click", () => { const v = pv(); v.muted = !v.muted; if (!v.muted && v.volume === 0) v.volume = 0.5; store.set("tr-muted", v.muted ? "1" : "0"); });
   $("#pcVol").addEventListener("input", (e) => { const v = pv(); v.volume = Number(e.target.value); v.muted = v.volume === 0; store.set("tr-volume", String(v.volume)); store.set("tr-muted", v.muted ? "1" : "0"); });
   $("#pcSeek").addEventListener("input", (e) => {
@@ -974,20 +1025,36 @@
   });
   $("#playerRetry").addEventListener("click", () => { P.tries = 0; pAttach(); });
   function toggleFullscreen() {
-    const stage = $("#playerStage");
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-    else (stage.requestFullscreen?.() || Promise.reject()).catch(() => {});
+    const stage = $("#playerStage"), v = pv();
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+      (document.exitFullscreen || document.webkitExitFullscreen).call(document)?.catch?.(() => {});
+      return;
+    }
+    const enter = stage.requestFullscreen || stage.webkitRequestFullscreen;
+    if (enter) {
+      Promise.resolve(enter.call(stage)).then(() => {
+        // Sul telefono la diretta si guarda meglio in orizzontale (dove il browser lo consente).
+        screen.orientation?.lock?.("landscape").catch(() => {});
+      }).catch(() => v.webkitEnterFullscreen?.());
+    } else if (v.webkitEnterFullscreen) {
+      v.webkitEnterFullscreen();   // iPhone: schermo intero nativo del video
+    }
   }
   $("#pcFull").addEventListener("click", toggleFullscreen);
   document.addEventListener("fullscreenchange", () => {
     $("#pcFull").innerHTML = icon(document.fullscreenElement ? "minimize" : "maximize");
+    if (!document.fullscreenElement) screen.orientation?.unlock?.();
   });
   $("#pcPip").hidden = !document.pictureInPictureEnabled;
   $("#pcPip").addEventListener("click", () => {
     if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
     else pv().requestPictureInPicture?.().catch(() => {});
   });
-  ["mousemove", "pointerdown", "keydown"].forEach((t) => P.el().addEventListener(t, pShowControls));
+  // Mouse: i controlli compaiono al movimento. Tocco: li gestisce il tap sul video (vedi sopra);
+  // toccare un controllo li tiene visibili.
+  P.el().addEventListener("pointermove", (e) => { if (e.pointerType === "mouse") pShowControls(); });
+  P.el().addEventListener("pointerdown", (e) => { if (e.pointerType === "mouse" || e.target.closest(".pc")) pShowControls(); });
+  P.el().addEventListener("keydown", pShowControls);
   P.el().addEventListener("keydown", (e) => {
     if (!P.src || e.target.matches("input[type=range]") && ["ArrowLeft", "ArrowRight"].includes(e.key)) return;
     const v = pv();
@@ -1013,8 +1080,17 @@
     btn.title = hidden ? "Mostra copertine e video (h)" : "Nascondi copertine e video (h)";
     btn.setAttribute("aria-label", btn.title);
   }
-  const toggleCovers = () => setCovers(!document.documentElement.classList.contains("covers-off"));
-  setCovers(document.documentElement.classList.contains("covers-off"));
+  function redrawAll() {
+    for (const m of [tiles, rows]) for (const el of m.values()) {
+      el.querySelectorAll(".mon-empty, .avatar, .tools, .plat-slot, .row-status, .mon-sub").forEach((n) => { n._html = null; n._sig = null; });
+    }
+    recNodes.forEach((n) => { n._sig = null; });
+    pTitle();
+    if (S.drawer) renderDrawer();
+    scheduleRender({ recordings: true });
+  }
+  const toggleCovers = () => { setCovers(!coversOff()); redrawAll(); };
+  setCovers(coversOff());
 
   // ── Selezione multipla ──
   function setSelecting(on) {

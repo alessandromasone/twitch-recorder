@@ -119,7 +119,7 @@ def get_users(logins: list[str]) -> dict[str, dict]:
         try:
             body = _get("users", [("login", login) for login in chunk])
         except Exception as exc:
-            logger.debug("Helix users non disponibile: %s", exc)
+            logger.warning("Icone dei canali non disponibili (Helix users): %s", exc)
             break
         with _users_lock:
             for row in body["data"]:

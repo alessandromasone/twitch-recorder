@@ -1,3 +1,10 @@
+Versione preview 7 — player da telefono, icone dei canali, titoli nascosti
+
+- Player sul telefono: il tocco sul video mostra o nasconde i controlli (non mette più in pausa), pulsante play grande al centro in pausa, avvio muto con «Tocca per l'audio» quando il browser blocca l'audio automatico, schermo intero nativo anche su iPhone con rotazione in orizzontale dove consentito, pulsante chiudi nella barra, pulsanti più grandi, pagina sotto bloccata, aree sicure dello schermo rispettate; in orizzontale solo il video.
+- Su iPhone senza supporto Media Source un messaggio spiega il motivo e rimanda all'app della piattaforma.
+- Icona del canale (avatar Twitch) al posto della lettera; la lettera resta se l'icona manca o non si carica. Errori nel recupero delle icone ora nel log.
+- Pulsante occhio: nasconde anche i titoli delle live (schede, righe, registrazioni, dettaglio, player e suggerimenti) e mostra l'iniziale al posto dell'icona.
+
 Versione preview 6 — spazio minimo, test in CI, lettore incluso
 
 - MIN_FREE_GB (predefinito 2): sotto questa soglia di spazio libero non partono nuove registrazioni; quelle in corso continuano. Avviso nella barra in alto e nel canale.

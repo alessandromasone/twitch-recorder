@@ -158,7 +158,9 @@
 <div class="player" id="player" aria-hidden="true">
   <div class="player-box" role="dialog" aria-modal="true" aria-labelledby="playerTitle">
     <div class="player-stage" id="playerStage">
-      <video id="video" playsinline></video>
+      <video id="video" playsinline webkit-playsinline preload="auto"></video>
+      <button class="pc-big" type="button" id="pcBig" aria-label="Riproduci"><svg><use href="#i-play"/></svg></button>
+      <button class="pc-unmute" type="button" id="pcUnmute" hidden><svg><use href="#i-volume-x"/></svg><span>Tocca per l'audio</span></button>
       <div class="player-status" id="playerStatus">
         <span class="spinner"></span><span id="playerStatusText">Caricamento…</span>
         <button class="btn" type="button" id="playerRetry" hidden>Riprova</button>
@@ -176,6 +178,7 @@
           <span class="pc-spacer"></span>
           <button class="pc-btn" type="button" id="pcPip" aria-label="Picture in picture" title="Picture in picture"><svg><use href="#i-pip"/></svg></button>
           <button class="pc-btn" type="button" id="pcFull" aria-label="Schermo intero" title="Schermo intero (f)"><svg><use href="#i-maximize"/></svg></button>
+          <button class="pc-btn pc-close" type="button" data-cmd="close-player" aria-label="Chiudi player"><svg><use href="#i-x"/></svg></button>
         </div>
       </div>
     </div>
