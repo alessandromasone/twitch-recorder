@@ -1,3 +1,7 @@
+Versione preview 5 — nascondi copertine
+
+- Pulsante occhio nella barra in alto e tasto h: coprono subito copertine, miniature delle registrazioni, avatar e video del player, e chiudono il picture-in-picture. Solo estetico (audio e REC continuano); lo stato resta dopo il ricaricamento ed è applicato prima del primo disegno, senza lampi di immagini.
+
 Versione preview 4 — correzione player e minimal a tabella
 
 - Player: mpegts.js riceveva un URL relativo dentro un worker, che non riesce a risolverlo («Failed to parse URL from /live/…», visto come «exception» e riconnessioni continue). Ora l'URL è assoluto e il worker è disattivato; i messaggi di errore indicano la causa (rete, server, decodifica).

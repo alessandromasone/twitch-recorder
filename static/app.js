@@ -722,7 +722,7 @@
       </div>
       <div class="group">
         <h3>Scorciatoie</h3>
-        <dl class="kv"><dt><kbd>/</kbd></dt><dd>Cerca</dd><dt><kbd>Esc</kbd></dt><dd>Chiudi pannello o player</dd><dt><kbd>s</kbd></dt><dd>Selezione multipla</dd></dl>
+        <dl class="kv"><dt><kbd>/</kbd></dt><dd>Cerca</dd><dt><kbd>Esc</kbd></dt><dd>Chiudi pannello o player</dd><dt><kbd>s</kbd></dt><dd>Selezione multipla</dd><dt><kbd>h</kbd></dt><dd>Nascondi o mostra copertine e video</dd></dl>
       </div>`;
   }
 
@@ -986,10 +986,28 @@
     const v = pv();
     if (e.key === " " || e.key === "k") { e.preventDefault(); if (v.paused) v.play().catch(() => {}); else v.pause(); }
     else if (e.key === "m") $("#pcMute").click();
+    else if (e.key === "h" && e.target.matches("input[type=range]")) toggleCovers();
     else if (e.key === "f") toggleFullscreen();
     else if (!P.src.live && e.key === "ArrowRight") v.currentTime += 10;
     else if (!P.src.live && e.key === "ArrowLeft") v.currentTime = Math.max(0, v.currentTime - 10);
   });
+
+  // ── Nascondi copertine (pulsante rapido, tasto h) ──
+  // Solo estetico: copertine, miniature, avatar e video vengono coperti; audio, REC e dati non cambiano.
+  function setCovers(hidden) {
+    document.documentElement.classList.toggle("covers-off", hidden);
+    // La finestra picture-in-picture sta fuori dalla pagina: va chiusa per nasconderla davvero.
+    if (hidden && document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
+    store.set("tr-covers-off", hidden ? "1" : "0");
+    const btn = $('[data-cmd="panic"]');
+    btn.setAttribute("aria-pressed", String(hidden));
+    btn.classList.toggle("on", hidden);
+    btn.innerHTML = icon(hidden ? "eye-off" : "eye");
+    btn.title = hidden ? "Mostra copertine e video (h)" : "Nascondi copertine e video (h)";
+    btn.setAttribute("aria-label", btn.title);
+  }
+  const toggleCovers = () => setCovers(!document.documentElement.classList.contains("covers-off"));
+  setCovers(document.documentElement.classList.contains("covers-off"));
 
   // ── Selezione multipla ──
   function setSelecting(on) {
@@ -1060,6 +1078,7 @@
           const next = order[(order.indexOf(cur) + 1) % order.length];
           document.documentElement.dataset.theme = next; store.set("tr-theme", next); return;
         }
+        case "panic": return toggleCovers();
         case "settings": return openDrawer({ type: "settings" });
         case "close-drawer": return closeDrawer();
         case "close-player": return closePlayer();
@@ -1175,6 +1194,7 @@
     }
     if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === "/") { e.preventDefault(); $("#search").focus(); }
+    if (e.key === "h") toggleCovers();
     if (e.key === "s") setSelecting(!S.selecting);
   });
   $("#player").addEventListener("click", (e) => { if (e.target.id === "player") closePlayer(); });

@@ -569,3 +569,19 @@ body.minimal .rec-live { display: inline; color: var(--tally-rec); font-weight: 
   body.minimal .rec-title { display: none; }
 }
 @media (max-width: 720px) { .bus-item { font-size: 12px; padding: 2px 8px; } }
+
+/* ── Copertine nascoste (pulsante occhio, tasto h) ── */
+.panic-btn.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.covers-off .mon-screen img, .covers-off .rec-thumb img, .covers-off .drawer-hero img,
+.covers-off .avatar img, .covers-off .mon-empty, .covers-off #playerAvatar img { visibility: hidden !important; }
+.covers-off .mon-screen::after, .covers-off .drawer-hero::after {
+  content: "Copertina nascosta"; position: absolute; inset: 0; display: grid; place-items: center;
+  color: #6b7286; font-size: 12.5px; background: var(--screen);
+}
+.covers-off .mon-play { display: none; }
+.covers-off #video { opacity: 0; }
+.covers-off .player-stage::before {
+  content: "Video nascosto · premi h per mostrarlo"; position: absolute; inset: 0; display: grid; place-items: center;
+  color: #8b92a5; font-size: 14px; pointer-events: none;
+}
+.covers-off .mon-screen .tally, .covers-off .mon-screen .viewers { z-index: 2; }
