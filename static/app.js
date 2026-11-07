@@ -22,7 +22,10 @@
     stats: {}, config: {}, disk: {}, quality: [], platforms: [], offset: 0,
     filter: store.get("tr-filter", "all"), sort: store.get("tr-sort", "default"),
     selecting: false, selected: new Set(), drawer: null, view: "channels",
+    uiMode: store.get("tr-ui", "auto"),   // auto (segue MINIMAL_UI) | full | minimal
   };
+  const isMinimal = () => S.uiMode === "minimal" || (S.uiMode === "auto" && !!S.config.minimal_ui);
+  function applyUiMode() { document.body.classList.toggle("minimal", isMinimal()); }
   if (!FILTERS.some(([k]) => k === S.filter)) S.filter = "all";
 
   const serverNow = () => Date.now() / 1000 - S.offset;
@@ -126,26 +129,25 @@
     if (!term) return true;
     return `${ch.name} ${ch.display_name || ""} ${ch.platform_label || ""} ${ch.title || ""} ${ch.game || ""}`.toLocaleLowerCase().includes(term);
   }
-  function priority(ch) {
-    if (ch.actually_recording) return 0;
-    if (ch.online && ch.is_recording) return 1;
-    if (ch.online) return 2;
-    if (ch.last_check_result === "rerun") return 3;
-    if (isIssue(ch)) return 4;
-    if (ch.is_recording && !ch.sleeping) return 5;
-    if (!ch.sleeping) return 6;
-    return 7;
-  }
-  function sorter(a, b) {
-    const byName = a.name.localeCompare(b.name, "it", { sensitivity: "base" });
-    const live = (c) => tsSeconds(c.last_live) || 0;
-    switch (S.sort) {
-      case "name": return byName;
-      case "last_live": return live(b) - live(a) || byName;
-      case "viewers": return (b.viewers || 0) - (a.viewers || 0) || priority(a) - priority(b) || byName;
-      case "last_checked": return (b.last_checked_at || 0) - (a.last_checked_at || 0) || byName;
-      default: return priority(a) - priority(b) || live(b) - live(a) || byName;
-    }
+  // Ordine stabile: i dati che cambiano a ogni controllo (ultima live, errori) non spostano le schede.
+  const byName = (a, b) => a.name.localeCompare(b.name, "it", { sensitivity: "base" });
+  const lastLive = (c) => tsSeconds(c.last_live) || 0;
+  const wallRank = (c) => (c.actually_recording ? 0 : c.online ? 1 : 2);
+  const listRank = (c) => (c.sleeping ? 2 : c.is_recording ? 0 : 1);
+  const startedAt = (c) => tsSeconds(c.stream_started_at) || c.rec_started_at || 0;
+  function sorterFor(section) {
+    return (a, b) => {
+      switch (S.sort) {
+        case "name": return byName(a, b);
+        case "last_live": return section === "wall" ? byName(a, b) : lastLive(b) - lastLive(a) || byName(a, b);
+        case "viewers": return (b.viewers || 0) - (a.viewers || 0) || byName(a, b);
+        case "last_checked": return (b.last_checked_at || 0) - (a.last_checked_at || 0) || byName(a, b);
+        default:
+          return section === "wall"
+            ? wallRank(a) - wallRank(b) || startedAt(a) - startedAt(b) || byName(a, b)
+            : listRank(a) - listRank(b) || lastLive(b) - lastLive(a) || byName(a, b);
+      }
+    };
   }
 
   function statusOf(ch) {
@@ -177,6 +179,7 @@
     S.stats = d.stats || {}; S.config = d.config || {}; S.disk = d.disk || {};
     S.quality = d.quality_options || []; S.platforms = d.platforms || [];
     initSelects();
+    applyUiMode();
     scheduleRender({ recordings: true });
   }
   function applyDelta(d) {
@@ -217,7 +220,16 @@
     $("#sRec").textContent = st.active_recordings ?? 0;
     $("#sRerun").textContent = st.suspected_reruns ?? 0;
     $("#sRerunWrap").hidden = !st.suspected_reruns;
-    document.body.classList.toggle("has-rec", (st.active_recordings || 0) > 0);
+    const recCount = st.active_recordings || 0;
+    document.body.classList.toggle("has-rec", recCount > 0);
+    if (renderHeader.lastRec !== recCount) {
+      renderHeader.lastRec = recCount;
+      document.title = recCount ? `● ${recCount} in REC · Twitch Recorder` : "Twitch Recorder";
+      const dot = recCount ? "#ef4444" : "#6b7286";
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#20242e"/><rect x="9" y="15" width="46" height="31" rx="5" fill="none" stroke="#8b5cf6" stroke-width="4"/><path d="M26 53h12" stroke="#8b5cf6" stroke-width="4" stroke-linecap="round"/><circle cx="32" cy="30.5" r="8" fill="${dot}"/></svg>`;
+      const link = document.querySelector('link[rel="icon"]');
+      if (link) link.href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+    }
     const health = $("#health");
     const ms = st.monitor_state || "ok";
     health.className = `health ${ms === "ok" ? "ok" : ms === "stopped" ? "bad" : ""}`;
@@ -255,14 +267,35 @@
   let lastInteraction = 0;
 
   function thumbSrc(ch) {
-    if (!ch.thumb_url) return "";
+    if (!ch.thumb_url || isMinimal()) return "";
     const bucket = Math.floor(Date.now() / (ch.thumb_url.startsWith("/") ? 90000 : 120000));
     return `${ch.thumb_url}${ch.thumb_url.includes("?") ? "&" : "?"}t=${bucket}`;
   }
   function avatarHtml(ch) {
-    return ch.avatar ? `<img src="${esc(ch.avatar)}" alt="" loading="lazy">` : esc((ch.display_name || ch.name).slice(0, 1).toUpperCase());
+    return ch.avatar && !isMinimal() ? `<img src="${esc(ch.avatar)}" alt="" loading="lazy">` : esc((ch.display_name || ch.name).slice(0, 1).toUpperCase());
   }
   const platTag = (ch) => `<span class="plat plat-${esc(ch.platform)}" title="${esc(ch.platform_label)}">${esc(ch.platform_short)}</span>`;
+
+
+  // Comandi rapidi sempre visibili (schede e righe).
+  function quickTools(el, ch, { compact = false } = {}) {
+    const box = el.querySelector(".tools");
+    const sig = [ch.is_recording, ch.actually_recording, ch.sleeping, ch.single_live_mode, compact].join("|");
+    if (box._sig === sig) return;
+    box._sig = sig;
+    const rec = ch.sleeping
+      ? `<button class="tool tool-sleep" type="button" data-act="sleep" title="Dorme: nessun controllo e nessuna REC. Clic per risvegliarlo">${icon("moon")}<span>Dorme</span></button>`
+      : ch.actually_recording
+        ? `<button class="tool tool-rec on" type="button" data-act="rec-toggle" title="Sta registrando. Clic per fermare e mettere in pausa">${icon("rec")}<span>REC attiva</span></button>`
+        : ch.is_recording
+          ? `<button class="tool tool-armed" type="button" data-act="rec-toggle" title="Registrerà appena il canale va in onda. Clic per mettere in pausa">${icon("rec")}<span>In attesa</span></button>`
+          : `<button class="tool tool-paused" type="button" data-act="rec-toggle" title="In pausa: il canale è controllato ma non registrato. Clic per registrare">${icon("pause")}<span>In pausa</span></button>`;
+    box.innerHTML = `${rec}
+      <button class="icon-btn ${ch.single_live_mode ? "is-once on" : ""}" type="button" data-act="once" aria-pressed="${!!ch.single_live_mode}" title="${ch.single_live_mode ? "Una volta attiva: dopo questa live il canale va in pausa. Clic per disattivare" : "Registra solo la prossima live (o quella in corso), poi pausa"}" aria-label="Una volta" ${ch.sleeping ? "disabled" : ""}>${icon("clock")}</button>
+      ${ch.sleeping ? "" : `<button class="icon-btn" type="button" data-act="sleep" title="Metti a dormire: niente controlli e niente REC" aria-label="Metti a dormire">${icon("moon")}</button>`}
+      <button class="icon-btn hide-compact" type="button" data-act="check" title="Controlla ora" aria-label="Controlla ora" ${ch.sleeping ? "disabled" : ""}>${icon("refresh")}</button>
+      <button class="icon-btn" type="button" data-act="details" title="Dettagli, qualità e rerun" aria-label="Dettagli">${icon("dots")}</button>`;
+  }
 
   function makeTile() {
     const el = document.createElement("article");
@@ -279,16 +312,13 @@
       <div class="mon-label">
         <span class="avatar"></span>
         <div class="mon-text">
-          <div class="mon-name"><a target="_blank" rel="noopener noreferrer"></a><span class="plat-slot"></span></div>
+          <div class="mon-name"><span class="mini-tally"></span><a target="_blank" rel="noopener noreferrer"></a><span class="plat-slot"></span></div>
           <div class="mon-title"></div>
           <div class="mon-sub"></div>
         </div>
-        <div class="mon-actions">
-          <button class="icon-btn" type="button" data-act="rec-toggle"></button>
-          <button class="icon-btn" type="button" data-act="details" title="Dettagli e impostazioni" aria-label="Dettagli">${icon("dots")}</button>
-        </div>
       </div>
-      <button class="cue-flag" type="button" data-act="details" hidden></button>`;
+      <div class="cue-flag" hidden></div>
+      <div class="tools mon-tools"></div>`;
     const img = el.querySelector("img");
     img.addEventListener("load", () => img.classList.add("loaded"));
     img.addEventListener("error", () => img.classList.remove("loaded"));
@@ -313,6 +343,7 @@
     if (ch.actually_recording) {
       tally.innerHTML = `REC <span data-since="${ch.rec_started_at || ""}">${duration(serverNow() - (ch.rec_started_at || serverNow()))}</span>`;
     } else setText(tally, ch.last_check_result === "rerun" ? "RERUN" : "LIVE");
+    setHtml(el.querySelector(".mini-tally"), tally.innerHTML);
     const v = el.querySelector(".viewers");
     v.hidden = ch.viewers == null;
     if (ch.viewers != null) setText(v.querySelector("span"), compact(ch.viewers));
@@ -332,17 +363,17 @@
     if (ch.preview_active) sub.push(`${ch.preview_connections} in visione`);
     if (ch.reconnect_attempts) sub.push(`<span class="warn">riconnessione ${ch.reconnect_attempts}/${S.config.reconnect_tries ?? 3}</span>`);
     setHtml(el.querySelector(".mon-sub"), sub.map((s) => `<span>${s}</span>`).join(""));
-    const rec = el.querySelector('[data-act="rec-toggle"]');
-    rec.className = `icon-btn ${ch.is_recording ? "is-rec" : ""}`;
-    setHtml(rec, icon(ch.is_recording ? "rec" : "pause"));
-    rec.title = ch.is_recording ? "Registrazione attiva: clic per mettere in pausa" : "In pausa: clic per registrare";
-    rec.setAttribute("aria-label", rec.title);
+    quickTools(el, ch);
     const flag = el.querySelector(".cue-flag");
     flag.hidden = !level;
     if (level) {
-      const label = { confirmed: "Rerun dichiarata", probable: "Probabile rerun", suspect: "Possibile rerun" }[level];
-      const tail = ch.last_check_result === "rerun" ? " · non registrata" : ch.actually_recording ? " · registrata e segnata" : "";
-      setHtml(flag, `${icon("repeat")}<span>${label}${ch.rerun?.score != null && level !== "confirmed" ? ` (${ch.rerun.score}/100)` : ""}${tail}</span>`);
+      const label = { confirmed: "Rerun", probable: "Rerun probabile", suspect: "Rerun?" }[level];
+      const tail = ch.last_check_result === "rerun" ? ", non registrata" : ch.actually_recording ? ", registrata e segnata" : "";
+      const manual = ch.rerun?.override;
+      const why = (ch.rerun?.reasons || []).map((r) => r.text).join("\n");
+      setHtml(flag, `${icon("repeat")}<button class="cue-text" type="button" data-act="details" title="${esc(`${label}${tail}\n${why}\nClic per i dettagli`)}">${label}${ch.rerun?.score != null && level !== "confirmed" ? ` ${ch.rerun.score}/100` : ""}</button>
+        ${manual ? "" : `<button class="cue-btn" type="button" data-act="verdict" data-value="rerun" title="Conferma: è una rerun">È rerun</button>
+        <button class="cue-btn" type="button" data-act="verdict" data-value="original" title="Non è una rerun: il titolo verrà ignorato in futuro">Non lo è</button>`}`);
     }
   }
 
@@ -355,10 +386,7 @@
       <div class="row-name"><span class="avatar"></span><a target="_blank" rel="noopener noreferrer"></a><span class="plat-slot"></span></div>
       <div class="row-status"></div>
       <span class="row-quality"></span>
-      <div class="row-actions">
-        <button class="icon-btn" type="button" data-act="rec-toggle"></button>
-        <button class="icon-btn" type="button" data-act="details" title="Dettagli e impostazioni" aria-label="Dettagli">${icon("dots")}</button>
-      </div>`;
+      <div class="tools row-actions"></div>`;
     return el;
   }
   function updateRow(el, ch) {
@@ -375,12 +403,7 @@
     setHtml(el.querySelector(".plat-slot"), platTag(ch));
     setHtml(el.querySelector(".row-status"), st.html);
     setText(el.querySelector(".row-quality"), ch.quality);
-    const rec = el.querySelector('[data-act="rec-toggle"]');
-    rec.disabled = !!ch.sleeping;
-    rec.className = `icon-btn ${ch.sleeping ? "is-sleep" : ch.is_recording ? "is-rec" : ""}`;
-    setHtml(rec, icon(ch.sleeping ? "moon" : ch.is_recording ? "rec" : "pause"));
-    rec.title = ch.sleeping ? "Dorme: risveglialo dai dettagli" : ch.is_recording ? "Registra quando va in onda: clic per mettere in pausa" : "In pausa: clic per registrare";
-    rec.setAttribute("aria-label", rec.title);
+    quickTools(el, ch, { compact: true });
   }
 
   function syncContainer(container, map, list, make, update) {
@@ -396,15 +419,17 @@
       if (current !== el && (!interacting || !el.isConnected)) container.insertBefore(el, current || null);
       index++;
     }
-    if (interacting) setTimeout(() => scheduleRender(), 1600);
+    if (interacting && !syncContainer.retry) {
+      syncContainer.retry = setTimeout(() => { syncContainer.retry = null; scheduleRender(); }, 1600);
+    }
   }
 
   function renderChannels() {
     const term = ($("#search").value || "").trim().toLocaleLowerCase();
     const visible = S.order.map((n) => S.channels.get(n)).filter(Boolean)
-      .filter((c) => matchesFilter(c) && matchesSearch(c, term)).sort(sorter);
-    const onAir = visible.filter(isOnAir);
-    const others = visible.filter((c) => !isOnAir(c));
+      .filter((c) => matchesFilter(c) && matchesSearch(c, term));
+    const onAir = visible.filter(isOnAir).sort(sorterFor("wall"));
+    const others = visible.filter((c) => !isOnAir(c)).sort(sorterFor("list"));
     syncContainer($("#wall"), tiles, onAir, makeTile, updateTile);
     syncContainer($("#rows"), rows, others, makeRow, updateRow);
     $("#wallSection").hidden = !onAir.length;
@@ -428,50 +453,127 @@
     if (diff === 1) return "Ieri";
     return d.toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
   }
+  // Rendering a chiavi: le righe esistenti non vengono ricreate, quindi miniature e scroll restano fermi.
+  const recNodes = new Map();
+  const dayNodes = new Map();
+  function recThumbHtml(r, ch) {
+    if (isMinimal()) return "";
+    if (r.in_use) return ch?.thumb_url ? `<img src="${esc(thumbSrc(ch))}" alt="" decoding="async">` : "";
+    return `<img src="/thumb/rec/${encodeURIComponent(r.name)}.jpg" alt="" loading="lazy" decoding="async" onerror="this.remove()">`;
+  }
+  function updateRecNode(el, r) {
+    const ch = S.channels.get(r.channel);
+    const sig = JSON.stringify([r.in_use, r.title, r.game, r.rerun?.level, r.in_use ? 0 : r.duration, ch?.display_name, isMinimal()]);
+    if (el._sig !== sig) {
+      el._sig = sig;
+      const started = new Date(r.order_ts * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+      const cue = r.rerun ? `<span class="cue-badge" title="${esc((r.rerun.reasons || []).join("\n"))}">${r.rerun.level === "confirmed" ? "rerun" : "rerun?"}</span>` : "";
+      const dur = r.in_use
+        ? `<span class="dur" data-since="${r.started_ts || ""}">${r.started_ts ? duration(serverNow() - r.started_ts) : ""}</span>`
+        : (r.duration ? `<span class="dur">${duration(r.duration)}</span>` : "");
+      el.innerHTML = `
+        <button class="rec-thumb ${r.in_use ? "live" : ""}" type="button" data-act="play-file" aria-label="Riproduci ${esc(r.name)}">${recThumbHtml(r, ch)}${dur}</button>
+        <div class="rec-info">
+          <div class="rec-channel">${r.in_use ? '<span class="rec-live">REC</span>' : ""}${esc(ch?.display_name || r.channel)}${cue}</div>
+          <div class="rec-title" title="${esc(r.title || r.name)}">${esc(r.title || r.name)}</div>
+          <div class="rec-meta"><span>${started}</span><span data-size></span>${r.game ? `<span>${esc(r.game)}</span>` : ""}</div>
+        </div>
+        <div class="rec-actions">
+          <a class="icon-btn" href="/recordings/${encodeURIComponent(r.name)}?dl=1" title="Scarica" aria-label="Scarica ${esc(r.name)}">${icon("download")}</a>
+          <button class="icon-btn" type="button" data-act="delete-file" ${r.in_use ? "disabled title='In registrazione'" : "title='Elimina'"} aria-label="Elimina ${esc(r.name)}">${icon("trash")}</button>
+        </div>`;
+    } else if (r.in_use && !isMinimal()) {
+      // Aggiorna solo la miniatura live quando cambia il suo intervallo di aggiornamento.
+      const img = el.querySelector(".rec-thumb img");
+      const src = ch ? thumbSrc(ch) : "";
+      if (img && src && img.getAttribute("src") !== src) img.src = src;
+    }
+    setText(el.querySelector("[data-size]"), humanSize(S.activeSizes[r.name] ?? r.size));
+  }
   function renderRecordings() {
     const box = $("#recs");
     const term = ($("#recSearch").value || "").trim().toLocaleLowerCase();
     const list = S.recordings.filter((r) => !term || `${r.name} ${r.title || ""} ${r.game || ""}`.toLocaleLowerCase().includes(term));
     const total = S.recordings.reduce((sum, r) => sum + (S.activeSizes[r.name] ?? r.size), 0);
-    $("#recTotal").textContent = S.recordings.length ? `${S.recordings.length} file, ${humanSize(total)}` : "";
+    setText($("#recTotal"), S.recordings.length ? `${S.recordings.length} file, ${humanSize(total)}` : "");
+    let empty = box.querySelector(":scope > .empty");
     if (!list.length) {
-      box.innerHTML = `<div class="empty">${S.recordings.length ? "Nessun file corrisponde al filtro." : "Le registrazioni compariranno qui appena un canale in REC va in onda."}</div>`;
+      for (const n of [...recNodes.values(), ...dayNodes.values()]) n.remove();
+      recNodes.clear(); dayNodes.clear();
+      if (!empty) { empty = document.createElement("div"); empty.className = "empty"; box.appendChild(empty); }
+      empty.textContent = S.recordings.length ? "Nessun file corrisponde al filtro." : "Le registrazioni compariranno qui appena un canale in REC va in onda.";
       return;
     }
-    let html = "", lastDay = "";
+    empty?.remove();
+    const wanted = [];
+    const seenFiles = new Set(), seenDays = new Set();
+    let lastDay = "";
     for (const r of list) {
       const day = dayLabel(r.order_ts);
-      if (day !== lastDay) { html += `<div class="rec-day">${esc(day)}</div>`; lastDay = day; }
-      const ch = S.channels.get(r.channel);
-      const thumb = r.in_use
-        ? (ch?.thumb_url ? `<img src="${esc(thumbSrc(ch))}" alt="" loading="lazy">` : "")
-        : `<img src="/thumb/rec/${encodeURIComponent(r.name)}.jpg" alt="" loading="lazy" onerror="this.remove()">`;
-      const started = new Date(r.order_ts * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
-      const cue = r.rerun ? `<span class="cue-badge" title="${esc((r.rerun.reasons || []).join("\n"))}">${r.rerun.level === "confirmed" ? "rerun" : "rerun?"}</span>` : "";
-      const size = S.activeSizes[r.name] ?? r.size;
-      html += `<div class="rec" data-file="${esc(r.name)}">
-        <button class="rec-thumb ${r.in_use ? "live" : ""}" type="button" data-act="play-file" aria-label="Riproduci ${esc(r.name)}">${thumb}${r.duration ? `<span class="dur">${duration(r.duration)}</span>` : ""}</button>
-        <div class="rec-info">
-          <div class="rec-channel">${esc(ch?.display_name || r.channel)}${cue}</div>
-          <div class="rec-title" title="${esc(r.title || r.name)}">${esc(r.title || r.name)}</div>
-          <div class="rec-meta"><span>${started}</span><span data-size>${humanSize(size)}</span>${r.game ? `<span>${esc(r.game)}</span>` : ""}</div>
-        </div>
-        <div class="rec-actions">
-          <a class="icon-btn" href="/recordings/${encodeURIComponent(r.name)}?dl=1" title="Scarica" aria-label="Scarica ${esc(r.name)}">${icon("download")}</a>
-          <button class="icon-btn" type="button" data-act="delete-file" ${r.in_use ? "disabled title='In registrazione'" : "title='Elimina'"} aria-label="Elimina ${esc(r.name)}">${icon("trash")}</button>
-        </div>
-      </div>`;
+      if (day !== lastDay) {
+        let h = dayNodes.get(day);
+        if (!h) { h = document.createElement("div"); h.className = "rec-day"; h.textContent = day; dayNodes.set(day, h); }
+        wanted.push(h); seenDays.add(day); lastDay = day;
+      }
+      let el = recNodes.get(r.name);
+      if (!el) { el = document.createElement("div"); el.className = "rec"; el.dataset.file = r.name; recNodes.set(r.name, el); }
+      updateRecNode(el, r);
+      wanted.push(el); seenFiles.add(r.name);
     }
-    const scroll = box.scrollTop;
-    box.innerHTML = html;
-    box.scrollTop = scroll;
+    for (const [k, n] of recNodes) if (!seenFiles.has(k)) { n.remove(); recNodes.delete(k); }
+    for (const [k, n] of dayNodes) if (!seenDays.has(k)) { n.remove(); dayNodes.delete(k); }
+    wanted.forEach((node, i) => { if (box.children[i] !== node) box.insertBefore(node, box.children[i] || null); });
   }
   function updateActiveSizes() {
     for (const [name, size] of Object.entries(S.activeSizes)) {
-      const el = $(`.rec[data-file="${CSS.escape(name)}"] [data-size]`);
-      if (el) el.textContent = humanSize(size);
+      const el = recNodes.get(name)?.querySelector("[data-size]");
+      if (el) setText(el, humanSize(size));
     }
   }
+
+  // ── Anteprima al passaggio del mouse ──
+  let hover = {};
+  const canHover = () => !isMinimal() && S.config.hover_preview !== false && !S.selecting
+    && matchMedia("(hover: hover) and (pointer: fine)").matches && !$("#player").classList.contains("open");
+  function stopHover() {
+    clearTimeout(hover.timer);
+    if (hover.player) { try { hover.player.destroy(); } catch { /* già chiuso */ } }
+    hover.video?.remove();
+    hover.screen?.classList.remove("previewing", "preview-on");
+    hover = {};
+  }
+  function startHover(screen) {
+    stopHover();
+    if (!canHover()) return;
+    hover.screen = screen;
+    hover.timer = setTimeout(async () => {
+      const ch = S.channels.get(screen.closest(".mon")?.dataset.name);
+      if (!ch || hover.screen !== screen) return;
+      try { await loadMpegts(); } catch { return; }
+      if (hover.screen !== screen || !mpegts.isSupported()) return;
+      screen.classList.add("previewing");
+      const v = document.createElement("video");
+      v.muted = true; v.playsInline = true; v.className = "mon-video";
+      v.addEventListener("playing", () => screen.classList.add("preview-on"));
+      screen.appendChild(v);
+      const p = mpegts.createPlayer({ type: "mpegts", isLive: true, url: `/live/${encodeURIComponent(ch.platform)}/${encodeURIComponent(ch.name)}` },
+        { enableStashBuffer: false, lazyLoad: false, liveBufferLatencyChasing: true, fixAudioTimestampGap: true, autoCleanupSourceBuffer: true });
+      p.attachMediaElement(v);
+      p.on(mpegts.Events.ERROR, () => { if (hover.player === p) stopHover(); });
+      p.load();
+      v.play().catch(() => {});
+      hover.player = p; hover.video = v;
+    }, 650);
+  }
+  $("#wall").addEventListener("pointerover", (e) => {
+    const screen = e.target.closest(".mon-screen");
+    if (screen && screen !== hover.screen) startHover(screen);
+  });
+  $("#wall").addEventListener("pointerout", (e) => {
+    const screen = e.target.closest(".mon-screen");
+    if (screen && !(e.relatedTarget && screen.contains(e.relatedTarget)) && screen === hover.screen) stopHover();
+  });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) stopHover(); });
 
   // ── Pannello dettagli canale ──
   function openDrawer(spec) {
@@ -606,6 +708,18 @@
         <p class="muted" style="font-size:12.5px">Si modificano nel file .env e si applicano al riavvio del container.</p>
       </div>
       <div class="group">
+        <h3>Aspetto</h3>
+        <div class="field">
+          <label for="uiMode">Interfaccia</label>
+          <select id="uiMode">
+            <option value="auto" ${S.uiMode === "auto" ? "selected" : ""}>Predefinita del server (${S.config.minimal_ui ? "minimal" : "completa"})</option>
+            <option value="full" ${S.uiMode === "full" ? "selected" : ""}>Completa: miniature, anteprime e avatar</option>
+            <option value="minimal" ${S.uiMode === "minimal" ? "selected" : ""}>Minimal: solo testo, nessuna immagine</option>
+          </select>
+          <small>Vale solo per questo browser. La predefinita si imposta con MINIMAL_UI nel file .env.</small>
+        </div>
+      </div>
+      <div class="group">
         <h3>Scorciatoie</h3>
         <dl class="kv"><dt><kbd>/</kbd></dt><dd>Cerca</dd><dt><kbd>Esc</kbd></dt><dd>Chiudi pannello o player</dd><dt><kbd>s</kbd></dt><dd>Selezione multipla</dd></dl>
       </div>`;
@@ -682,6 +796,7 @@
     v.play().catch(() => playerStatus("Premi Play per avviare."));
   }
   async function openPlayer({ title, url, live, ts, external, tally }) {
+    stopHover();
     endPlayback(); destroyPlayer();
     $("#playerTitle").textContent = title;
     $("#playerTally").className = `player-tally ${tally || ""}`;
@@ -725,6 +840,7 @@
   // ── Selezione multipla ──
   function setSelecting(on) {
     S.selecting = on;
+    stopHover();
     if (!on) S.selected.clear();
     document.body.classList.toggle("selecting", on);
     $$('[data-cmd="select-mode"]').forEach((b) => b.setAttribute("aria-pressed", String(on)));
@@ -838,6 +954,12 @@
     if (t.id === "bulkQuality" && t.value) { await runBulk("quality", t.value); t.value = ""; return; }
     if (t.id === "bulkRerun" && t.value) { await runBulk("rerun_policy", t.value === "default" ? "" : t.value); t.value = ""; return; }
     if (t.id === "importFile" && t.files[0]) { await importFile(t.files[0]); t.value = ""; return; }
+    if (t.id === "uiMode") {
+      S.uiMode = t.value; store.set("tr-ui", S.uiMode); applyUiMode(); stopHover();
+      for (const m of [tiles, rows]) for (const el of m.values()) { el.querySelectorAll(".mon-empty, .avatar, .tools, .plat-slot").forEach((n) => { n._html = null; n._sig = null; }); }
+      recNodes.forEach((n) => { n._sig = null; });
+      scheduleRender({ recordings: true }); return;
+    }
     if (S.drawer?.type === "channel") {
       const name = S.drawer.name;
       if (t.dataset.act === "quality") { await act(room("set_quality", name, { quality: t.value })); t.blur(); }
@@ -904,7 +1026,10 @@
     const now = serverNow();
     $$("[data-since]").forEach((el) => { const t = Number(el.dataset.since); if (t) el.textContent = duration(now - t); });
     if (tick % 20 === 0) $$("[data-rel]").forEach((el) => { el.textContent = ago(el.dataset.rel); });
-    if (tick % 60 === 0) $$(".mon").forEach((el) => { const ch = S.channels.get(el.dataset.name); if (ch) updateTile(el, ch); });
+    if (tick % 60 === 0) {
+      $$(".mon").forEach((el) => { const ch = S.channels.get(el.dataset.name); if (ch) updateTile(el, ch); });
+      renderRecordings();
+    }
   }, 1000);
 
   // ── Collegamento in tempo reale ──

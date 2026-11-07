@@ -1,3 +1,12 @@
+Versione preview 2 — comandi rapidi, anteprima al passaggio, minimal, liste stabili
+
+- Comandi sempre visibili su schede e righe: stato REC (REC attiva / In attesa / In pausa / Dorme) con un clic, Una volta, A dormire, Controlla ora, Dettagli; sulle rerun sospette i pulsanti «È rerun» e «Non lo è».
+- Anteprima video muta dopo 650 ms col puntatore sulla miniatura (solo dispositivi con mouse); usa la preview condivisa, che si chiude 10 s dopo l'uscita. HOVER_PREVIEW=false la disattiva.
+- MINIMAL_UI: interfaccia solo testo senza miniature, avatar, anteprime e animazioni; selezionabile anche per browser in Impostazioni → Aspetto. Con MINIMAL_UI le miniature dei file non vengono generate.
+- Liste stabili: le schede non cambiano ordine a ogni controllo (in onda: REC, poi live, poi ora d'inizio; altri: attivi, in pausa, dormienti, poi ultima live); la lista registrazioni viene aggiornata a chiavi senza ricreare righe e immagini.
+- Nuova favicon con indicatore REC dinamico e titolo della scheda con il numero di registrazioni attive.
+- Login rinnovato: mostra/nascondi password, avviso blocco maiuscole, tentativi rimanenti, durata della sessione.
+
 Versione preview — riorganizzazione completa, interfaccia nuova, rerun non dichiarate
 
 - Codice diviso in moduli (pacchetto twrec/): configurazione, stato, controlli, monitor, recorder, preview, rerun, file, SSE, API. Variabili .env e API esistenti restano compatibili.

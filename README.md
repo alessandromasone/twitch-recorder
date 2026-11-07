@@ -11,6 +11,9 @@ Applicazione web self-hosted che registra automaticamente le dirette di Twitch, 
 - **Preview condivisa.** Una sola sorgente per canale, qualunque sia il numero di finestre aperte. Durante la REC la preview usa il flusso già scaricato; senza REC apre un flusso temporaneo che si chiude quando l'ultima finestra viene chiusa. Non crea mai file.
 - **Miniature senza costi.** Durante la REC il fotogramma viene preso dal flusso già in memoria; per Twitch fuori REC dal CDN pubblico; per i file conclusi viene generato una sola volta.
 - **Registrazioni con contesto:** raggruppate per giorno, con miniatura, durata, titolo e categoria della live e segnalazione rerun.
+- **Comandi sempre a portata:** su ogni scheda e riga ci sono REC/pausa, *Una volta*, *A dormire*, controllo immediato e, per le rerun sospette, «È rerun» / «Non lo è».
+- **Anteprima al passaggio del mouse** sulle miniature delle live (muta, disattivabile con `HOVER_PREVIEW=false`).
+- **Versione minimal** con `MINIMAL_UI=true` o per singolo browser: solo testo, nessuna immagine.
 - **Gestione:** pannello di dettaglio per ogni canale, selezione multipla (pausa, registra, dormi, qualità, politica rerun, rimozione), ricerca anche per titolo e gioco, filtri con contatori, modalità *Una volta*, modalità *A dormire* e import/export in JSON e CSV.
 - **Aggiornamenti in tempo reale** via SSE incrementale: dopo il primo stato completo arrivano solo i canali cambiati. Senza client collegati non viene calcolato nulla.
 - **Login opzionale** con CSRF, limite ai tentativi e sessione persistente.
@@ -170,7 +173,14 @@ Helix aggiorna lo stato delle live con qualche decina di secondi di ritardo risp
 | `DELETE_AFTER_CONVERT` | `false` | Elimina il TS solo dopo una conversione riuscita |
 | `DEDUP_ENABLED` | `false` | Elimina i file conclusi identici a uno già registrato |
 | `DEDUP_BYTES` / `DEDUP_FILE` | `2097152` / accanto a `CHANNELS_FILE` | Campione e indice della deduplicazione |
-| `RECORDING_THUMBS` | `true` | Miniature dei file conclusi, in `recordings/.thumbs` |
+| `RECORDING_THUMBS` | `true` (`false` con `MINIMAL_UI`) | Miniature dei file conclusi, in `recordings/.thumbs` |
+
+### Interfaccia
+
+| Variabile | Default | Descrizione |
+|---|---|---|
+| `MINIMAL_UI` | `false` | Versione minimal predefinita: niente miniature, anteprime, avatar e animazioni. Ogni browser può cambiarla da Impostazioni → Aspetto |
+| `HOVER_PREVIEW` | `true` | Anteprima video muta dopo mezzo secondo col puntatore su una live. Durante la REC usa il flusso già scaricato; fuori REC apre la sorgente temporanea condivisa, chiusa 10 s dopo che il puntatore esce |
 
 I segmenti più piccoli di 4 KB, per esempio quando una live non parte, vengono eliminati automaticamente.
 

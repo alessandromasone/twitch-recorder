@@ -5,35 +5,90 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
   <meta name="robots" content="noindex,nofollow">
-  <title>Accesso · Twitch Recorder</title>
+  <title>Accedi · Twitch Recorder</title>
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg', v=static_v) }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v=static_v) }}">
   <script>try{const t=localStorage.getItem("tr-theme");if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
   <style>
-    body { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
-    .login { width: min(100%, 380px); padding: 28px; border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--panel); box-shadow: var(--shadow); }
-    .login .brand { margin-bottom: 24px; }
-    .login h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: -.02em; }
-    .login p { margin: 0 0 20px; color: var(--muted); }
+    body { min-height: 100vh; display: grid; place-items: center; padding: 24px; overflow: hidden; }
+    /* Sullo sfondo, una parete di monitor spenti: uno solo è in onda. */
+    .wallpaper {
+      position: fixed; inset: -40px; display: grid; gap: 14px; z-index: 0; pointer-events: none;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); grid-auto-rows: 124px;
+      opacity: .55; transform: rotate(-4deg) scale(1.05);
+      mask-image: radial-gradient(ellipse at center, #000 10%, transparent 72%);
+      -webkit-mask-image: radial-gradient(ellipse at center, #000 10%, transparent 72%);
+    }
+    .wallpaper span { border-radius: 8px; background: var(--panel); border: 1px solid var(--line); }
+    .wallpaper span.air { box-shadow: inset 0 0 0 3px var(--tally-rec); }
+    .login {
+      position: relative; z-index: 1; width: min(100%, 400px); padding: 30px 28px 26px;
+      border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: var(--shadow);
+    }
+    .login .brand { margin-bottom: 26px; font-size: 16px; }
+    .login .brand-tally { background: var(--tally-rec); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tally-rec) 30%, transparent), 0 0 14px var(--tally-rec); }
+    .login h1 { margin: 0 0 6px; font-size: 24px; letter-spacing: -.02em; }
+    .login p.lead { margin: 0 0 22px; color: var(--muted); }
     .login label { display: block; margin-bottom: 6px; font-weight: 600; font-size: 13px; }
-    .login input { width: 100%; height: 42px; }
-    .login .btn { width: 100%; height: 42px; justify-content: center; margin-top: 14px; }
-    .login .error-box { margin-bottom: 16px; }
+    .pw { position: relative; }
+    .pw input { width: 100%; height: 44px; padding-right: 46px; font-size: 15px; }
+    .pw input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+    .pw .icon-btn { position: absolute; right: 5px; top: 5px; }
+    .hint { min-height: 20px; margin: 6px 0 0; font-size: 12.5px; color: var(--tally-cue); }
+    .login .btn { width: 100%; height: 44px; justify-content: center; margin-top: 8px; font-size: 15px; }
+    .login .error-box { margin: 0 0 16px; }
+    .foot { margin: 18px 0 0; font-size: 12.5px; color: var(--faint); text-align: center; }
   </style>
 </head>
 <body>
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 6.1A10 10 0 0 1 12 6c6.5 0 10 6 10 6a17 17 0 0 1-3.2 3.9M6.6 6.6C3.8 8.3 2 12 2 12s3.5 6.5 10 6.5c1.8 0 3.3-.5 4.6-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></symbol>
+  </svg>
+  <div class="wallpaper" aria-hidden="true">
+    {% for i in range(48) %}<span{% if i in (8, 30) %} class="air"{% endif %}></span>{% endfor %}
+  </div>
   <main class="login">
     <div class="brand"><span class="brand-tally" aria-hidden="true"></span>Twitch Recorder</div>
-    <h1>Accedi</h1>
-    <p>Inserisci la password del pannello.</p>
+    <h1>Bentornato</h1>
+    <p class="lead">Inserisci la password per aprire la regia.</p>
     {% if error %}<p class="error-box" role="alert">{{ error }}</p>{% endif %}
-    <form action="{{ url_for('login') }}" method="post">
+    <form action="{{ url_for('login') }}" method="post" id="loginForm">
       <input type="hidden" name="csrf_token" value="{{ csrf_token_value }}">
       <input type="hidden" name="next" value="{{ next_path }}">
       <label for="password">Password</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
-      <button class="btn btn-primary" type="submit">Accedi</button>
+      <div class="pw">
+        <input id="password" name="password" type="password" autocomplete="current-password" required autofocus spellcheck="false">
+        <button class="icon-btn" type="button" id="togglePw" aria-label="Mostra la password" title="Mostra la password"><svg><use href="#i-eye"/></svg></button>
+      </div>
+      <p class="hint" id="capsHint" aria-live="polite"></p>
+      <button class="btn btn-primary" type="submit" id="submitBtn">Accedi</button>
     </form>
+    <p class="foot">La sessione resta attiva per {{ session_hours }} ore su questo browser.</p>
   </main>
+  <script>
+    (() => {
+      const input = document.getElementById("password");
+      const toggle = document.getElementById("togglePw");
+      toggle.addEventListener("click", () => {
+        const show = input.type === "password";
+        input.type = show ? "text" : "password";
+        toggle.querySelector("use").setAttribute("href", show ? "#i-eye-off" : "#i-eye");
+        toggle.setAttribute("aria-label", show ? "Nascondi la password" : "Mostra la password");
+        toggle.title = toggle.getAttribute("aria-label");
+        input.focus();
+      });
+      const caps = (e) => {
+        document.getElementById("capsHint").textContent =
+          e.getModifierState && e.getModifierState("CapsLock") ? "Il blocco maiuscole è attivo." : "";
+      };
+      input.addEventListener("keydown", caps);
+      input.addEventListener("keyup", caps);
+      document.getElementById("loginForm").addEventListener("submit", () => {
+        const b = document.getElementById("submitBtn");
+        b.disabled = true; b.textContent = "Accesso…";
+      });
+    })();
+  </script>
 </body>
 </html>

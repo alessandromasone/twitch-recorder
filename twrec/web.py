@@ -22,7 +22,7 @@ from flask import (
 from . import actions, monitor, preview, state, status, storage
 from .actions import ActionError
 from .config import (
-    APP_PASSWORD, APP_SESSION_HOURS, CHANNELS_FILE, DATA_DIR, DEFAULT_PLATFORM, LOGIN_ENABLED,
+    APP_PASSWORD, APP_SESSION_HOURS, CHANNELS_FILE, DATA_DIR, DEFAULT_PLATFORM, LOGIN_ENABLED, MINIMAL_UI,
     QUALITY_OPTIONS, RECORDINGS_DIR, SESSION_COOKIE_SECURE, STREAM_QUALITY, logger,
 )
 from .recorder import Recorder
@@ -98,7 +98,7 @@ def _csrf_token() -> str:
 @app.context_processor
 def _template_context():
     return {"csrf_token_value": _csrf_token(), "login_enabled": LOGIN_ENABLED,
-            "session_hours": APP_SESSION_HOURS, "static_v": STATIC_VERSION}
+            "session_hours": APP_SESSION_HOURS, "static_v": STATIC_VERSION, "minimal_ui": MINIMAL_UI}
 
 
 def _login_wait(ip: str) -> int:
@@ -170,7 +170,11 @@ def login():
                 return redirect(next_path)
             else:
                 _login_failed(ip)
-                error = "Password non corretta."
+                with _login_lock:
+                    left = max(0, _LOGIN_MAX - len(_login_attempts.get(ip, ())))
+                error = ("Password non corretta. " + (
+                    f"Ancora {left} {'tentativo' if left == 1 else 'tentativi'} prima di un blocco di 5 minuti."
+                    if left else "Accesso bloccato per 5 minuti."))
     response = app.make_response(render_template("login.html", error=error, next_path=next_path))
     response.headers["Cache-Control"] = "no-store"
     return response
