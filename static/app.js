@@ -882,6 +882,8 @@
     const v = P.v(), src = P.src;
     if (!src) return;
     P.el().classList.toggle("paused", v.paused);
+    $("#pcBig").innerHTML = icon(v.paused ? "play" : "pause");
+    $("#pcBig").setAttribute("aria-label", v.paused ? "Riproduci" : "Pausa");
     if (!v.muted) $("#pcUnmute").hidden = true;
     $("#pcPlay").innerHTML = icon(v.paused ? "play" : "pause");
     $("#pcPlay").setAttribute("aria-label", v.paused ? "Riproduci" : "Pausa");
@@ -923,11 +925,18 @@
     P.src = src; P.tries = 0;
     const el = P.el();
     el.classList.toggle("is-live", !!src.live);
-    pTitle();
+    el.classList.toggle("touch", matchMedia("(pointer: coarse)").matches);
+    $("#playerBox").style.transform = "";
+    const tag = $("#ptTag");
+    tag.textContent = src.live ? (src.rec ? "REC" : "LIVE") : "FILE";
+    tag.className = `pt-tag ${src.live ? (src.rec ? "pt-rec" : "pt-air") : "pt-file"}`;
+    $("#playerDetails").hidden = !src.channel || !src.live;
+    $("#ptName").textContent = src.channel?.display_name || src.channel?.name || "";
     $("#playerSub").innerHTML = src.sub || "";
     pTitle();
     const ext = $("#playerExternal");
     ext.hidden = !src.external; if (src.external) ext.href = src.external;
+    $("#playerExternalLabel").textContent = src.channel ? `Apri su ${src.channel.platform_label}` : "Apri";
     const dl = $("#playerDownload");
     dl.hidden = !src.download; if (src.download) dl.href = src.download;
     $("#pcSeek").value = 0;
@@ -945,7 +954,7 @@
     }
     if (P.src !== src) return;
     pAttach();
-    setTimeout(() => $("#pcPlay").focus(), 50);
+    if (!el.classList.contains("touch")) setTimeout(() => $("#pcPlay").focus(), 50);
   }
 
   function closePlayer(silent = false) {
@@ -973,6 +982,7 @@
       realTitle: ch.title,
       sub: `<b>${esc(ch.display_name || ch.name)}</b>${meta.map((m) => `<span>${esc(m)}</span>`).join("")}`,
       channel: ch,
+      rec: !!ch.actually_recording,
       external: ch.home_url,
       since: tsSeconds(ch.stream_started_at) || ch.rec_started_at || null,
     });
@@ -997,19 +1007,82 @@
   const pv = () => P.v();
   $("#pcPlay").addEventListener("click", () => { const v = pv(); if (v.paused) v.play().catch(() => {}); else v.pause(); });
   let lastPointer = "mouse";
+  const togglePlay = () => { const v = pv(); if (v.paused) v.play().catch(() => {}); else v.pause(); };
   $("#playerStage").addEventListener("pointerdown", (e) => { lastPointer = e.pointerType || "mouse"; }, true);
+
+  // Tocco sul video: un tocco mostra o nasconde i controlli. Sui file, un doppio tocco
+  // sul terzo sinistro o destro va indietro o avanti di 10 secondi (come nelle app video).
+  let tapTimer = null, lastTap = { t: 0, x: 0 };
+  function seekBy(delta, side) {
+    const v = pv();
+    v.currentTime = Math.max(0, Math.min((Number.isFinite(v.duration) ? v.duration : Infinity), v.currentTime + delta));
+    const fx = side === "left" ? $("#fxBack") : $("#fxFwd");
+    fx.classList.remove("show"); void fx.offsetWidth; fx.classList.add("show");
+  }
   $("#playerStage").addEventListener("click", (e) => {
     if (e.target.closest(".pc, .player-status, .pc-big, .pc-unmute")) return;
-    if (lastPointer !== "mouse") {
-      // Sul telefono un tocco mostra o nasconde i controlli; play e pausa hanno i loro pulsanti.
-      const el = P.el();
-      if (el.classList.contains("idle")) pShowControls(); else { clearTimeout(P.timers.idle); el.classList.add("idle"); }
+    if (lastPointer === "drag") return;
+    if (lastPointer === "mouse") { togglePlay(); return; }
+    const el = P.el();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const now = Date.now();
+    if (!P.src?.live && now - lastTap.t < 300 && (x < 0.35 || x > 0.65)) {
+      clearTimeout(tapTimer); tapTimer = null;
+      seekBy(x < 0.35 ? -10 : 10, x < 0.35 ? "left" : "right");
+      lastTap = { t: 0, x: 0 };
       return;
     }
-    const v = pv(); if (v.paused) v.play().catch(() => {}); else v.pause();
+    lastTap = { t: now, x };
+    clearTimeout(tapTimer);
+    tapTimer = setTimeout(() => {
+      if (el.classList.contains("idle")) pShowControls(); else { clearTimeout(P.timers.idle); el.classList.add("idle"); }
+    }, P.src?.live ? 0 : 220);
   });
   $("#playerStage").addEventListener("dblclick", (e) => { if (lastPointer === "mouse" && !e.target.closest(".pc")) toggleFullscreen(); });
-  $("#pcBig").addEventListener("click", () => { pv().play().catch(() => {}); pShowControls(); });
+  $("#pcBig").addEventListener("click", () => { togglePlay(); pShowControls(); });
+
+  // Trascinare verso il basso (dalla barra in alto o dal video) chiude il player.
+  (() => {
+    const box = $("#playerBox");
+    let drag = null;
+    const start = (e) => {
+      if (e.pointerType === "mouse" || !P.el().classList.contains("touch") || e.target.closest(".pc, input, a, .player-actions")) return;
+      if (document.fullscreenElement) return;
+      drag = { y: e.clientY, x: e.clientX, dy: 0, t: Date.now(), active: false };
+    };
+    const move = (e) => {
+      if (!drag) return;
+      const dy = e.clientY - drag.y, dx = Math.abs(e.clientX - drag.x);
+      if (!drag.active) {
+        if (dy > 12 && dy > dx * 1.5) { drag.active = true; box.classList.add("dragging"); }
+        else if (dx > 12 || dy < -12) { drag = null; return; }
+        else return;
+      }
+      drag.dy = Math.max(0, dy);
+      box.style.transform = `translateY(${drag.dy}px)`;
+      box.style.opacity = String(Math.max(0.4, 1 - drag.dy / 600));
+      e.preventDefault();
+    };
+    const end = () => {
+      if (!drag) return;
+      const { dy, t, active } = drag;
+      drag = null;
+      if (!active) return;
+      box.classList.remove("dragging");
+      lastPointer = "drag";   // il tocco che termina il trascinamento non apre i controlli
+      setTimeout(() => { lastPointer = "touch"; }, 50);
+      const fast = dy / Math.max(1, Date.now() - t) > 0.6;
+      if (dy > 140 || (fast && dy > 50)) {
+        box.style.transform = "translateY(100%)"; box.style.opacity = "0";
+        setTimeout(() => { closePlayer(); box.style.transform = ""; box.style.opacity = ""; }, 180);
+      } else { box.style.transform = ""; box.style.opacity = ""; }
+    };
+    for (const target of [$("#playerTop"), $("#playerStage")]) target.addEventListener("pointerdown", start);
+    window.addEventListener("pointermove", move, { passive: false });
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  })();
   $("#pcUnmute").addEventListener("click", () => {
     const v = pv(); v.muted = false; if (v.volume === 0) v.volume = 0.8;
     store.set("tr-muted", "0"); $("#pcUnmute").hidden = true;
@@ -1024,6 +1097,11 @@
     const v = pv(); if (v.buffered.length) v.currentTime = v.buffered.end(v.buffered.length - 1) - 2; v.play().catch(() => {});
   });
   $("#playerRetry").addEventListener("click", () => { P.tries = 0; pAttach(); });
+  $("#playerDetails").addEventListener("click", () => {
+    const name = P.src?.channel?.name;
+    closePlayer();
+    if (name) openDrawer({ type: "channel", name });
+  });
   function toggleFullscreen() {
     const stage = $("#playerStage"), v = pv();
     if (document.fullscreenElement || document.webkitFullscreenElement) {

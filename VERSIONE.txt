@@ -1,3 +1,9 @@
+Versione preview 8 — player da telefono riprogettato
+
+- Sul telefono il player è un foglio a tutto schermo come nelle app video: barra in alto con «abbassa», stato (REC/LIVE/FILE) e canale; video a tutta larghezza; sotto titolo completo, canale, gioco, origine del flusso e pulsanti «Dettagli», «Apri su Twitch», «Scarica».
+- Gesti: tocco per mostrare/nascondere i controlli, play/pausa grande al centro, trascinamento verso il basso per chiudere, doppio tocco a sinistra/destra per −10/+10 s sui file.
+- In orizzontale solo il video a tutto schermo. Il desktop resta invariato, con in più il pulsante Dettagli.
+
 Versione preview 7 — player da telefono, icone dei canali, titoli nascosti
 
 - Player sul telefono: il tocco sul video mostra o nasconde i controlli (non mette più in pausa), pulsante play grande al centro in pausa, avvio muto con «Tocca per l'audio» quando il browser blocca l'audio automatico, schermo intero nativo anche su iPhone con rotazione in orizzontale dove consentito, pulsante chiudi nella barra, pulsanti più grandi, pagina sotto bloccata, aree sicure dello schermo rispettate; in orizzontale solo il video.
