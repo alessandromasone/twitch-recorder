@@ -5,8 +5,14 @@ diventa automaticamente la nota della GitHub Release quando si pubblica il tag `
 
 ## Non rilasciato
 
+- Nessuna modifica.
+
+## 2.1.0
+
 - `RECORDING_LOGS=false` disattiva i file di log per canale (`recordings/.<canale>.log`) ed elimina all'avvio quelli rimasti; `RECORDING_LOG_MAX_MB` (predefinito 5) li ruota in `.log.1`, così non crescono più senza limiti.
 - Le miniature dei file conclusi non vengono più salvate su disco: si generano al volo e restano solo in memoria (al massimo 300). La vecchia cartella `recordings/.thumbs` viene eliminata all'avvio.
+- Ordine dei controlli: prima quelli chiesti a mano e i canali in REC, poi quelli con la registrazione attiva, infine quelli in pausa (con Helix i canali Twitch restano in un'unica richiesta).
+- Colonna Registrazioni: lista vuota con margini corretti, intestazione centrata e righe allineate (niente più spazio riservato alla barra di scorrimento).
 - I metadati delle registrazioni passano da `recordings/.recordings_meta.json` a `recordings_meta.json` accanto a `channels.json` (spostati automaticamente).
 
 ## 2.0.0

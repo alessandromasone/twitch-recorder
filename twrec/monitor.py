@@ -353,10 +353,7 @@ def _monitor_loop() -> None:
                         continue
                     due = state.next_check_due.get(n, 0.0)
                     if n in forced or due <= cycle_now:
-                        rec = state.recorders.get(n)
-                        eligible.append((0 if n in forced else 1, 0 if rec and rec.is_recording else 1,
-                                         0 if ch.get("single_live_mode") else 1, due, n.lower(), n,
-                                         norm_platform(ch.get("platform"))))
+                        eligible.append(check_order(ch, forced, due) + (n, norm_platform(ch.get("platform"))))
                 eligible.sort()
                 use_helix = HELIX_ENABLED and time.time() >= _helix_backoff_until
                 batch_running = any(k in _batch_futures for k in inflight)
@@ -394,6 +391,18 @@ def _monitor_loop() -> None:
 
 
 _batch_futures: set[Future] = set()
+
+
+def check_order(ch: dict, forced: set[str], due: float) -> tuple:
+    """Priorità dei controlli: prima quelli chiesti a mano, poi i canali in REC, poi quelli con la
+    registrazione attiva (Una volta per primi), infine quelli in pausa; a parità, la scadenza più vecchia."""
+    n = ch["name"]
+    rec = state.recorders.get(n)
+    return (0 if n in forced else 1,
+            0 if rec and rec.is_recording else 1,
+            0 if ch.get("is_recording", False) else 1,
+            0 if ch.get("single_live_mode") else 1,
+            due, n.lower())
 
 
 def _watchdog_loop() -> None:

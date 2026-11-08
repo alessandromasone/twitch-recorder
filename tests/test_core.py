@@ -336,3 +336,13 @@ def test_legacy_files_cleanup(tmp_path, monkeypatch):
     storage.cleanup_legacy_files()
     assert [p.name for p in rec_dir.iterdir()] == ["a.ts"]
     assert "title" in new_meta.read_text()
+
+
+def test_check_order_active_channels_before_paused():
+    from twrec import monitor
+    chans = [{"name": "paused_old", "is_recording": False}, {"name": "active_new", "is_recording": True},
+             {"name": "forced", "is_recording": False}, {"name": "active_old", "is_recording": True},
+             {"name": "once", "is_recording": True, "single_live_mode": True}]
+    due = {"paused_old": 1, "active_new": 50, "forced": 99, "active_old": 10, "once": 70}
+    chans.sort(key=lambda c: monitor.check_order(c, {"forced"}, due[c["name"]]))
+    assert [c["name"] for c in chans] == ["forced", "once", "active_old", "active_new", "paused_old"]

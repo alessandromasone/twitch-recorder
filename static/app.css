@@ -299,10 +299,12 @@ body:not(.selecting) .mon-check { display: none; }
 }
 
 /* ── Registrazioni ── */
-.side-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 14px 10px; border-bottom: 1px solid var(--line); }
-.side-head .section-title { margin: 12px 0 0; }
-.side-head .search { margin-top: 10px; width: 150px; }
-.recs { overflow-y: auto; padding: 4px 0 10px; scrollbar-gutter: stable; }
+.side-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); min-height: 52px; }
+.side-head .section-title { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-head .search { width: 150px; flex: none; }
+/* Niente spazio riservato alla barra di scorrimento: le righe restano allineate all'intestazione. */
+.recs { overflow-y: auto; padding: 4px 0 10px; scrollbar-width: thin; }
+.recs > .empty { margin: 12px 14px 4px; padding: 28px 16px; }
 .rec-day { font-size: 12px; font-weight: 600; color: var(--faint); padding: 12px 14px 4px; }
 .rec {
   display: grid; grid-template-columns: 104px minmax(0, 1fr) auto; gap: 10px; align-items: center;
