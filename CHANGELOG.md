@@ -5,7 +5,9 @@ diventa automaticamente la nota della GitHub Release quando si pubblica il tag `
 
 ## Non rilasciato
 
-- Nessuna modifica.
+- **Kick: niente più "in REC" senza file quando il canale è offline.** Se streamlink si collega ma non arriva video, la registrazione non riparte più all'infinito: un segmento conta come riuscito solo se ha scritto almeno 256 KB, e dopo 3 minuti senza video la REC si chiude con un messaggio chiaro.
+- **Pausa dopo un tentativo a vuoto**: se un'intera sessione non ha ricevuto video, il canale aspetta 5, 10, 20 e poi 30 minuti prima di riprovare. **Controlla ora** (o Registra) annulla l'attesa.
+- **Stato più onesto nell'interfaccia**: il badge REC compare solo quando i dati arrivano davvero. Mentre il flusso si sta collegando, o se si ferma, il canale mostra "Connessione al flusso…" e il file vuoto non compare tra le registrazioni.
 
 ## 2.2.0
 

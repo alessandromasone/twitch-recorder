@@ -26,6 +26,10 @@ def _channel(name: str) -> dict:
 def _queue_check(name: str) -> None:
     state.next_check_due[name] = 0.0
     state.force_check.add(name)
+    # Un'azione esplicita (Controlla ora, Registra…) annulla l'attesa dopo un tentativo senza video.
+    rec = state.recorders.get(name)
+    if rec is not None:
+        rec.cooldown_until = 0.0
 
 
 def _done() -> None:
@@ -252,9 +256,11 @@ def force_check(name: str | None = None) -> tuple[int, bool]:
             if target and target.get("sleeping"):
                 skipped_sleeping = True
             elif target:
-                state.force_check.add(name)
+                _queue_check(name)
         else:
-            state.force_check.update(c["name"] for c in state.channels if not c.get("sleeping"))
+            for c in state.channels:
+                if not c.get("sleeping"):
+                    _queue_check(c["name"])
         queued = len(state.force_check)
     state.monitor_wake.set()
     return queued, skipped_sleeping

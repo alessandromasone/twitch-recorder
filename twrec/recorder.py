@@ -114,6 +114,10 @@ def stall_limit(platform: str) -> int:
     return RECORDING_STALL_SECONDS
 
 
+# Dopo quanto si chiude una REC che non riceve video nonostante il canale risulti online.
+NO_VIDEO_GIVEUP_SECONDS = 180
+
+
 class Recorder:
     def __init__(self, channel_name: str, quality: str = "best", platform: str = DEFAULT_PLATFORM):
         self.channel_name = channel_name
@@ -132,7 +136,13 @@ class Recorder:
         self.shared_stream: LiveStreamHub | None = None
         self.reconnect_attempts = 0
         self.last_error = ""
-        self._last_data = 0.0
+        self._last_data = 0.0          # ultimo blocco di dati ricevuto (0 = nessuno in questo segmento)
+        self._segment_started = 0.0
+        self.session_bytes = 0          # dati scritti nell'intera sessione
+        # Dopo una sessione che non ha mai ricevuto dati il monitor attende prima di riprovare,
+        # invece di ripartire a ogni controllo (pausa crescente da 5 a 30 minuti).
+        self.cooldown_until = 0.0
+        self._cooldown_step = 0
 
     # ── ciclo di vita ──
 
@@ -144,6 +154,7 @@ class Recorder:
             self.is_recording = True
             self.started_at = time.time()
             self.last_error = ""
+            self.session_bytes = 0
             self._thread = threading.Thread(target=self._manager_loop, daemon=True,
                                             name=f"rec-{self.channel_name}")
             self._thread.start()
@@ -169,6 +180,13 @@ class Recorder:
         logger.info("⏹ Stop: %s", self.channel_name)
         if wait and thread and thread is not threading.current_thread():
             thread.join(timeout=wait)
+
+    @property
+    def receiving(self) -> bool:
+        """True se la registrazione sta davvero ricevendo dati (non solo tentando di collegarsi)."""
+        if not self.is_recording or not self._last_data:
+            return False
+        return time.time() - self._last_data < max(30, stall_limit(self.platform))
 
     def heal_if_dead(self) -> bool:
         """Rete di sicurezza: se il thread di registrazione è morto ma lo stato dice ancora REC,
@@ -198,7 +216,7 @@ class Recorder:
         if not limit:
             return
         while not done.wait(5):
-            idle = time.time() - self._last_data
+            idle = time.time() - max(self._last_data, self._segment_started)
             if idle >= limit:
                 logger.warning("📡 %s: nessun dato da %ds — chiudo e ricontrollo il canale",
                                self.channel_name, int(idle))
@@ -250,6 +268,7 @@ class Recorder:
         except Exception:
             logger.exception("Errore imprevisto nella registrazione di %s", self.channel_name)
         finally:
+            self._end_session_cooldown()
             with self._lock:
                 hub = self.shared_stream
                 self.shared_stream = None
@@ -306,7 +325,8 @@ class Recorder:
                         terminate(source)
                     self._write_session_meta(filename)
                     storage.index.invalidate()
-                    self._last_data = time.time()
+                    self._last_data = 0.0
+                    self._segment_started = time.time()
                     threading.Thread(target=self._stall_watch, args=(source, process, segment_done),
                                      daemon=True, name=f"rec-stall-{self.channel_name}").start()
                     stdout = process.stdout
@@ -317,7 +337,10 @@ class Recorder:
                             break
                         out.write(chunk)
                         hub.publish(chunk)
+                        if not written:
+                            storage.index.invalidate()   # il file compare nella lista solo con dati
                         written += len(chunk)
+                        self.session_bytes += len(chunk)
                         self._last_data = time.time()
                         if split_threshold and written >= split_threshold and not self._split_triggered:
                             logger.info("Split %s (%s)", filename, human_size(written))
@@ -368,17 +391,23 @@ class Recorder:
                 logger.info("✂ %s: split dopo %s — riavvio", self.channel_name, fmt_duration(elapsed))
                 time.sleep(1)
                 continue
-            if elapsed < 20:
+            # Un segmento conta come riuscito solo se ha portato dati veri. Prima contava la
+            # durata: un flusso che si collegava senza mai inviare video (per esempio Kick appena
+            # offline) ripartiva all'infinito e il canale restava "in REC" senza nessun file.
+            productive = written >= 256 * 1024
+            if not productive:
                 if not self.last_error:
-                    self.last_error = f"Flusso interrotto rapidamente (codice FFmpeg {exit_code})"
+                    self.last_error = (f"Nessun video ricevuto (codice FFmpeg {exit_code})" if elapsed >= 20
+                                       else f"Flusso interrotto rapidamente (codice FFmpeg {exit_code})")
                 if error_start is None:
                     error_start = time.time()
-                if time.time() - error_start > 180:
-                    self.last_error = "Tolleranza errori superata dopo tentativi di riconnessione"
-                    logger.error("Tolleranza errori superata per %s — stop.", self.channel_name)
+                if time.time() - error_start > NO_VIDEO_GIVEUP_SECONDS:
+                    self.last_error = "Nessun video ricevuto per 3 minuti nonostante i tentativi: REC chiusa"
+                    logger.error("%s: nessun video ricevuto per 3 minuti — stop.", self.channel_name)
                     break
+                # Il canale risulta online ma il flusso non arriva: si riprova, ma senza
+                # azzerare il conteggio degli errori finché non arrivano dati.
                 if self._smart_retry():
-                    error_start = None
                     continue
                 break
             error_start = None
@@ -386,6 +415,18 @@ class Recorder:
             self.last_error = ""
             logger.info("Fine segmento %s dopo %s — riavvio.", self.channel_name, fmt_duration(elapsed))
             time.sleep(1)
+
+    def _end_session_cooldown(self) -> None:
+        """Pausa prima del prossimo tentativo se l'intera sessione non ha ricevuto dati."""
+        if self.session_bytes >= 256 * 1024 or self.stop_requested:
+            self.cooldown_until = 0.0
+            self._cooldown_step = 0
+            return
+        delay = min(30 * 60, 5 * 60 * (2 ** self._cooldown_step))
+        self._cooldown_step = min(self._cooldown_step + 1, 3)
+        self.cooldown_until = time.time() + delay
+        logger.warning("%s: nessun video ricevuto in questa sessione — nuovo tentativo tra %d min",
+                       self.channel_name, delay // 60)
 
     def _smart_retry(self) -> bool:
         for attempt in range(RECONNECT_TRIES):

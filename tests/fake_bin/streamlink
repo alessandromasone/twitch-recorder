@@ -8,7 +8,9 @@ url = next((a for a in args if a.startswith("http")), "")
 name = url.rstrip("/").split("/")[-1]
 # live* = flusso continuo; stall* = pochi dati e poi silenzio con la connessione aperta;
 # child* = come live ma con un processo figlio che tiene aperta la pipe (come il muxer FFmpeg).
-live = name.startswith(("live", "stall", "child"))
+# mute* = risulta online, apre il flusso ma esce subito senza video (Kick appena andato offline);
+# silent* = risulta online, apre il flusso e non invia mai dati.
+live = name.startswith(("live", "stall", "child", "mute", "silent"))
 if "--json" in args:
     if live:
         print(json.dumps({"plugin":"twitch","metadata":{"id":"1","author":name,"category":"Just Chatting","title":json.loads(os.environ.get("FAKE_TITLES","{}")).get(name,"Titolo di "+name)},"streams":{"720p":{},"best":{}}}))
@@ -20,6 +22,10 @@ if "--stdout" in args:
         print("error: No playable streams found", file=sys.stderr); sys.exit(1)
     q = args[-1].split(",")[0]
     print(f"[cli][info] Opening stream: {q} (hls)", file=sys.stderr, flush=True)
+    if name.startswith("mute"):
+        time.sleep(0.3); sys.exit(0)
+    if name.startswith("silent"):
+        time.sleep(600); sys.exit(0)
     src = os.environ.get("FAKE_TS")
     with open(src, "rb") as fh:
         data = fh.read()

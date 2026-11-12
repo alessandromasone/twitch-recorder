@@ -104,6 +104,16 @@ def active_files() -> dict[str, float]:
     return active
 
 
+def connecting_files() -> set[str]:
+    """File appena creati da registrazioni che non hanno ancora ricevuto dati: non si mostrano."""
+    names = set()
+    for rec in list(state.recorders.values()):
+        path = rec.output_path
+        if rec.is_recording and path and not rec._last_data:
+            names.add(os.path.basename(path))
+    return names
+
+
 def _start_ts_from_name(name: str) -> float | None:
     match = _TS_RE.search(name)
     if not match:
@@ -139,7 +149,7 @@ class RecordingsIndex:
         self._dirty = True
         state.request_broadcast()
 
-    def _scan(self, active: dict[str, float]) -> None:
+    def _scan(self, active: dict[str, float], hidden: set[str] = frozenset()) -> None:
         files: dict[str, dict] = {}
         try:
             entries = list(os.scandir(RECORDINGS_DIR))
@@ -148,6 +158,8 @@ class RecordingsIndex:
         for entry in entries:
             name = entry.name
             if name.startswith(".") or os.path.splitext(name)[1].lower() not in VIDEO_EXTS:
+                continue
+            if name in hidden:
                 continue
             try:
                 st = entry.stat()
@@ -183,10 +195,11 @@ class RecordingsIndex:
     def snapshot(self) -> tuple[int, list[dict], dict[str, int]]:
         """Ritorna (versione, lista ordinata, dimensioni correnti dei file attivi)."""
         active = active_files()
+        hidden = connecting_files()
         with self._lock:
             if self._dirty or time.time() - self._last_scan > self.RESCAN_SECONDS \
-                    or any(name not in self._files for name in active):
-                self._scan(active)
+                    or any(name not in self._files and name not in hidden for name in active):
+                self._scan(active, hidden)
             now = time.time()
             out = []
             for name, info in self._files.items():

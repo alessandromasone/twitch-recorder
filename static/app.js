@@ -152,6 +152,10 @@
 
   function statusOf(ch) {
     if (ch.sleeping) return { dot: "sleeping", html: "Dorme: controlli sospesi" };
+    // Registrazione avviata ma senza video in arrivo (in collegamento o in riconnessione).
+    if (ch.rec_connecting && !ch.online) {
+      return { dot: "verifying", html: `<span class="warn">Connessione al flusso${ch.reconnect_attempts ? ` (tentativo ${ch.reconnect_attempts})` : ""}…</span>${ch.last_error ? ` · ${esc(ch.last_error)}` : ""}` };
+    }
     switch (ch.last_check_result) {
       case "verifying_offline": return { dot: "verifying", html: `<span class="warn">Verifico la fine della live ${ch.offline_confirmation_count}/${ch.offline_confirmations_required}</span>` };
       case "error": return { dot: "error", html: `<span class="err">Controllo non riuscito</span> · ultimo stato ${ch.last_status === "online" ? "online" : "offline"}` };
@@ -366,6 +370,7 @@
     else sub.push(esc(ch.quality));
     if (ch.preview_active) sub.push(`${ch.preview_connections} in visione`);
     if (ch.reconnect_attempts) sub.push(`<span class="warn">riconnessione ${ch.reconnect_attempts}/${S.config.reconnect_tries ?? 3}</span>`);
+    else if (ch.rec_connecting) sub.push(`<span class="warn">connessione al flusso…</span>`);
     setHtml(el.querySelector(".mon-sub"), sub.map((s) => `<span>${s}</span>`).join(""));
     quickTools(el, ch);
     const flag = el.querySelector(".cue-flag");
@@ -414,7 +419,8 @@
         : `<span class="live-tag">${ch.last_check_result === "rerun" ? "RERUN" : "LIVE"}</span>`;
       const parts = [ch.title ? `<span class="live-title" title="${esc(T(ch.title))}">${esc(T(ch.title))}</span>` : "",
         ch.game ? `<span class="live-game">${esc(ch.game)}</span>` : "", ch.viewers != null ? `<span>${compact(ch.viewers)}</span>` : "",
-        level ? `<span class="warn">${level === "confirmed" ? "rerun" : "rerun?"}</span>` : ""].join("");
+        level ? `<span class="warn">${level === "confirmed" ? "rerun" : "rerun?"}</span>` : "",
+        ch.rec_connecting ? `<span class="warn">connessione al flusso…</span>` : ""].join("");
       setHtml(el.querySelector(".row-status"), `${tag}${parts}`);
       el.querySelector(".dot").className = `dot ${ch.actually_recording ? "error" : "online"}`;
     } else setHtml(el.querySelector(".row-status"), st.html);
@@ -430,7 +436,8 @@
     let state, cls, info = "";
     if (ch.actually_recording) {
       state = `REC <span data-since="${ch.rec_started_at || ""}">${duration(serverNow() - (ch.rec_started_at || serverNow()))}</span>`; cls = "m-rec";
-    } else if (ch.last_check_result === "rerun") { state = "rerun"; cls = "m-cue"; }
+    } else if (ch.rec_connecting && !ch.sleeping) { state = "collegamento"; cls = "m-cue"; }
+    else if (ch.last_check_result === "rerun") { state = "rerun"; cls = "m-cue"; }
     else if (ch.online) { state = "live"; cls = "m-air"; }
     else if (ch.sleeping) { state = "dorme"; cls = "m-off"; }
     else if (ch.last_check_result === "verifying_offline") { state = `verifica ${ch.offline_confirmation_count}/${ch.offline_confirmations_required}`; cls = "m-cue"; }

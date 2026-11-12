@@ -258,6 +258,15 @@ def apply_check_result(name: str, res: CheckResult) -> None:
         to_start = None
     elif to_start:
         _low_disk_warned.discard(name)
+    if to_start and to_start.cooldown_until > time.time():
+        # L'ultima sessione non ha ricevuto video: si attende prima di riprovare.
+        wait = int(to_start.cooldown_until - time.time())
+        with state.lock:
+            current = state.find_channel(name)
+            if current is not None:
+                current["last_error"] = (f"In onda ma nessun video ricevuto nell'ultimo tentativo: "
+                                         f"riprovo tra {max(1, wait // 60)} min (o usa Controlla ora)")
+        to_start = None
     if to_start:
         with state.lock:
             current = state.find_channel(name)

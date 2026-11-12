@@ -1,4 +1,6 @@
+import glob
 import json
+import os
 import time
 
 import pytest
@@ -501,6 +503,69 @@ def test_heal_if_dead_releases_stuck_recorder(recorder_env):
         rec._thread = None
     assert rec.heal_if_dead()
     assert not rec.is_recording and not rec.heal_if_dead()
+
+
+def test_stream_without_video_does_not_stay_in_rec(recorder_env, monkeypatch):
+    """Kick: il canale risulta online ma il flusso non porta mai video. Prima ripartiva
+    all'infinito e restava "in REC" senza nessun file."""
+    monkeypatch.setattr(recorder_env, "check_channel", lambda name, platform: CheckResult(True, True, "online"))
+    monkeypatch.setattr(recorder_env, "NO_VIDEO_GIVEUP_SECONDS", 2)
+    rec = recorder_env.Recorder("mutekick", "best", "kick")
+    rec.start()
+    assert _wait_until(lambda: not rec.is_recording, 20), "la REC senza video non si è chiusa"
+    assert "Nessun video" in rec.last_error or "Flusso" in rec.last_error, rec.last_error
+    assert rec.cooldown_until > time.time() + 60, "manca la pausa prima del prossimo tentativo"
+    assert rec.session_bytes == 0
+    assert not glob.glob(os.path.join(recorder_env.RECORDINGS_DIR, "*mutekick*")), "file vuoto rimasto"
+
+
+def test_connecting_recording_is_not_shown_as_rec(recorder_env):
+    from twrec import storage
+    state.channels.append({"name": "silentkick", "platform": "kick", "quality": "best",
+                           "auto_record": True})
+    rec = recorder_env.Recorder("silentkick", "best", "kick")
+    state.recorders["silentkick"] = rec
+    try:
+        rec.start()
+        assert _wait_until(lambda: rec.output_path, 15)
+        assert not rec.receiving
+        name = os.path.basename(rec.output_path)
+        assert name in storage.connecting_files()
+        row = next(c for c in status.build_full()["channels"] if c["name"] == "silentkick")
+        assert row["rec_connecting"] and not row["actually_recording"]
+    finally:
+        rec.stop(wait=15)
+        state.recorders.pop("silentkick", None)
+        state.channels[:] = [c for c in state.channels if c["name"] != "silentkick"]
+    assert not rec.is_recording
+
+
+def test_check_now_clears_cooldown(recorder_env):
+    from twrec import actions
+    rec = recorder_env.Recorder("cooldown", "best", "kick")
+    rec.cooldown_until = time.time() + 600
+    state.recorders["cooldown"] = rec
+    try:
+        actions._queue_check("cooldown")
+        assert rec.cooldown_until == 0.0
+        assert "cooldown" in state.force_check
+    finally:
+        state.recorders.pop("cooldown", None)
+        state.force_check.discard("cooldown")
+        state.next_check_due.pop("cooldown", None)
+
+
+def test_productive_session_resets_cooldown(recorder_env):
+    rec = recorder_env.Recorder("ok", "best", "kick")
+    rec._cooldown_step = 2
+    rec.session_bytes = 10 * 1024 * 1024
+    rec._end_session_cooldown()
+    assert rec.cooldown_until == 0.0 and rec._cooldown_step == 0
+    rec.session_bytes = 0
+    rec._end_session_cooldown()
+    first = rec.cooldown_until - time.time()
+    rec._end_session_cooldown()
+    assert 290 < first <= 300 and rec.cooldown_until - time.time() > first + 200
 
 
 def test_twitch_stall_limit_covers_ad_breaks(monkeypatch):

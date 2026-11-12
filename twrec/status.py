@@ -45,7 +45,10 @@ def _channel_dict(ch: dict, now: float) -> dict:
     rec = state.recorders.get(name)
     if rec:
         with rec._lock:
-            rec_is_recording = bool(rec.is_recording)
+            # "In REC" solo quando arrivano dati: mentre si collega (o ritenta) il canale non
+            # risulta in registrazione e il file non compare nella lista.
+            rec_running = bool(rec.is_recording)
+            rec_is_recording = bool(rec_running and rec.receiving)
             rec_started = rec.started_at
             rec_stream = rec.shared_stream
             reconnect_attempts = rec.reconnect_attempts
@@ -53,7 +56,7 @@ def _channel_dict(ch: dict, now: float) -> dict:
             resolved_quality = rec.resolved_quality
             current_file = rec.output_path
     else:
-        rec_is_recording, rec_started, rec_stream = False, None, None
+        rec_running, rec_is_recording, rec_started, rec_stream = False, False, None, None
         reconnect_attempts, recorder_error, resolved_quality, current_file = 0, "", None, None
     uptime = now - rec_started if rec_is_recording and rec_started else 0
     lc = state.last_checked.get(name, 0)
@@ -82,6 +85,7 @@ def _channel_dict(ch: dict, now: float) -> dict:
         "last_error": ch.get("last_error") or recorder_error,
         "is_recording": bool(ch.get("is_recording", False)),
         "actually_recording": rec_is_recording,
+        "rec_connecting": bool(rec_running and not rec_is_recording),
         "rec_started_at": rec_started if rec_is_recording else None,
         "uptime": round(uptime),
         "uptime_human": fmt_duration(uptime) if uptime > 0 else None,
