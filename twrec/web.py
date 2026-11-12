@@ -22,7 +22,8 @@ from flask import (
 from . import actions, monitor, preview, state, status, storage
 from .actions import ActionError
 from .config import (
-    APP_PASSWORD, APP_SESSION_HOURS, APP_VERSION, CHANNELS_FILE, DATA_DIR, DEFAULT_PLATFORM, LOGIN_ENABLED, MINIMAL_UI,
+    APP_PASSWORD, APP_SESSION_HOURS, APP_VERSION, CHANNELS_BACKUPS, CHANNELS_FILE, DATA_DIR, DEFAULT_PLATFORM,
+    LOGIN_ENABLED, MINIMAL_UI,
     QUALITY_OPTIONS, RECORDINGS_DIR, SESSION_COOKIE_SECURE, STREAM_QUALITY, logger,
 )
 from .recorder import Recorder
@@ -229,7 +230,8 @@ def preview_live(platform, room):
         abort(404)
     except Exception as exc:
         logger.warning("Impossibile avviare la preview di %s: %s", room, exc)
-        return jsonify(error="Impossibile avviare il flusso live. Verifica che la diretta sia online."), 503
+        reason = preview.last_error(room) or "verifica che la diretta sia online"
+        return jsonify(error=f"Impossibile avviare il flusso live: {reason}."), 503
     return Response(preview.stream(source), mimetype="video/mp2t", headers={
         "Cache-Control": "no-store, no-cache, must-revalidate",
         "Pragma": "no-cache", "X-Accel-Buffering": "no", "X-Content-Type-Options": "nosniff",
@@ -246,6 +248,9 @@ def thumb_live(room):
     if ch and norm_platform(ch.get("platform")) == "twitch":
         # Nessun fotogramma disponibile: si usa la copertina ufficiale di Twitch.
         return redirect(f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{room}-440x248.jpg", code=302)
+    youtube_thumb = (state.live_meta.get(room) or {}).get("thumbnail_url")
+    if ch and norm_platform(ch.get("platform")) == "youtube" and youtube_thumb:
+        return redirect(youtube_thumb, code=302)
     return Response(status=204, headers={"Cache-Control": "no-store"})
 
 
@@ -456,6 +461,35 @@ def api_room_action():
     return jsonify(result)
 
 
+@app.route("/api/backups")
+def api_backups():
+    items = []
+    for backup in state.list_backups():
+        chans = backup["channels"]
+        items.append({
+            "id": backup["id"],
+            "saved_at": backup["saved_at"],
+            "count": len(chans),
+            "recording": sum(1 for c in chans if c.get("is_recording") and not c.get("sleeping")),
+            "paused": sum(1 for c in chans if not c.get("is_recording") and not c.get("sleeping")),
+            "sleeping": sum(1 for c in chans if c.get("sleeping")),
+            "channels": [{"name": c.get("name"), "platform": c.get("platform"),
+                          "state": "dorme" if c.get("sleeping") else ("REC" if c.get("is_recording") else "pausa")}
+                         for c in chans],
+        })
+    return jsonify({"ok": True, "backups": items, "keep": CHANNELS_BACKUPS})
+
+
+@app.route("/api/backups/restore", methods=["POST"])
+def api_restore_backup():
+    data = request.get_json(silent=True) or {}
+    try:
+        msg = actions.restore_backup(str(data.get("id", "")))
+    except ActionError as exc:
+        return jsonify({"ok": False, "msg": exc.msg}), exc.status
+    return jsonify({"ok": True, "msg": msg})
+
+
 @app.route("/api/delete_recording", methods=["POST"])
 def api_delete_recording():
     data = request.get_json(silent=True) or {}
@@ -484,12 +518,37 @@ def health():
 
 # ── Avvio ──
 
+_shutdown_lock = threading.Lock()
+_shutdown_done = False
+
+
 def _shutdown() -> None:
-    for rec in list(state.recorders.values()):
-        if rec.is_recording:
-            rec.stop()
+    """Chiude tutte le registrazioni in parallelo e attende che i file siano chiusi, entro il
+    tempo concesso da Docker (stop_grace_period)."""
+    global _shutdown_done
+    with _shutdown_lock:
+        if _shutdown_done:
+            return
+        _shutdown_done = True
+    logger.info("Chiusura: fermo le registrazioni in corso")
+    status.close_all()   # le connessioni aperte (aggiornamenti, player) non trattengono il processo
+    active = [rec for rec in list(state.recorders.values()) if rec.is_recording]
+    threads = [threading.Thread(target=rec.stop, kwargs={"wait": 20}, daemon=True) for rec in active]
+    for thread in threads:
+        thread.start()
+    deadline = time.monotonic() + 25
+    for thread in threads:
+        thread.join(timeout=max(0.0, deadline - time.monotonic()))
     preview.stop_all()
     monitor.shutdown()
+    state.flush()
+
+
+def shutdown_in_background() -> threading.Thread:
+    """Avvia la chiusura ordinata senza bloccare il gestore del segnale."""
+    thread = threading.Thread(target=_shutdown, name="shutdown")
+    thread.start()
+    return thread
 
 
 def boot() -> None:

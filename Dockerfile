@@ -8,7 +8,7 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py .
+COPY app.py gunicorn.conf.py ./
 COPY twrec/ twrec/
 COPY templates/ templates/
 COPY static/ static/
@@ -41,4 +41,4 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')" || exit 1
 
 ENTRYPOINT ["tini", "--"]
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "32", "--timeout", "120", "--graceful-timeout", "20", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "32", "--timeout", "120", "--graceful-timeout", "30", "app:app"]

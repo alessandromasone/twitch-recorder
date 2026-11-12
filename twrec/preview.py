@@ -13,7 +13,7 @@ import time
 from . import state, storage
 from .checks import streamlink_base_command
 from .config import (
-    PREVIEW_IDLE_TIMEOUT_SECONDS, PREVIEW_LINGER_SECONDS, PREVIEW_STARTUP_TIMEOUT_SECONDS,
+    LIVE_STREAM_BUFFER_BYTES, PREVIEW_IDLE_TIMEOUT_SECONDS, PREVIEW_LINGER_SECONDS, PREVIEW_STARTUP_TIMEOUT_SECONDS,
     STREAM_QUALITY, logger,
 )
 from .hub import LiveStreamHub
@@ -23,6 +23,39 @@ from .util import norm_platform, platform_url
 
 _lock = threading.Lock()
 _sources: dict[str, "PreviewSource"] = {}
+
+# Ultimo motivo per cui la preview di un canale non è partita (mostrato nel player).
+_errors: dict[str, tuple[float, str]] = {}
+ERROR_TTL = 180
+
+
+def set_error(room: str, message: str | None) -> None:
+    with _lock:
+        if message:
+            _errors[room] = (time.time(), message[:240])
+        else:
+            _errors.pop(room, None)
+    state.request_broadcast()
+
+
+def last_error(room: str) -> str | None:
+    with _lock:
+        item = _errors.get(room)
+    if item and time.time() - item[0] < ERROR_TTL:
+        return item[1]
+    return None
+
+
+def _friendly_streamlink_error(line: str) -> str:
+    lowered = line.lower()
+    if "403" in lowered or "forbidden" in lowered:
+        return "la piattaforma ha rifiutato la connessione (403): riprova tra poco"
+    if "no playable streams" in lowered or "no streams found" in lowered:
+        return "nessun flusso disponibile: la diretta potrebbe essere appena finita"
+    if "private" in lowered or "subscriber" in lowered:
+        return "la diretta è privata o riservata agli abbonati"
+    text = line.split("error:", 1)[-1].strip() if "error:" in lowered else line.strip()
+    return text[:200] or "il flusso si è chiuso prima di inviare video"
 
 
 def _key(platform: str, room: str) -> str:
@@ -61,12 +94,13 @@ class PreviewSource:
         self.mode = mode                         # shared | temporary
         self.rec_hub = rec_hub
         self.quality = quality
-        self.hub = LiveStreamHub(max_bytes=2 * 1024 * 1024)
+        self.hub = LiveStreamHub(max_bytes=min(LIVE_STREAM_BUFFER_BYTES, 4 * 1024 * 1024))
         self.viewers = 0
         self.ffmpeg: subprocess.Popen | None = None
         self.streamlink: subprocess.Popen | None = None
         self._linger_timer: threading.Timer | None = None
         self._stopped = False
+        self._last_line = ""
 
     @property
     def alive(self) -> bool:
@@ -83,13 +117,18 @@ class PreviewSource:
                 "--stdout", platform_url(self.platform, self.room), fallback_list(self.quality)]
             self.streamlink = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                                stderr=subprocess.PIPE, bufsize=0, start_new_session=True)
-            threading.Thread(target=pump_stderr, args=(self.streamlink, None), daemon=True,
+            threading.Thread(target=pump_stderr, args=(self.streamlink, None, self._on_line), daemon=True,
                              name=f"pv-sl-{self.room}").start()
             self.ffmpeg = subprocess.Popen(remux_command("error", fast_probe=True), stdin=self.streamlink.stdout,
                                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                            bufsize=0, start_new_session=True)
             self.streamlink.stdout.close()
         threading.Thread(target=self._pump_output, daemon=True, name=f"pv-out-{self.room}").start()
+
+    def _on_line(self, line: str) -> None:
+        lowered = line.lower()
+        if "error" in lowered or "403" in lowered or "private" in lowered or "no playable" in lowered:
+            self._last_line = line
 
     def _feed_from_rec(self) -> None:
         stdin = self.ffmpeg.stdin
@@ -109,15 +148,27 @@ class PreviewSource:
 
     def _pump_output(self) -> None:
         stdout = self.ffmpeg.stdout
+        received = 0
         try:
             while True:
                 chunk = stdout.read(64 * 1024)
                 if not chunk:
                     break
+                if not received and self.mode == "temporary":
+                    set_error(self.room, None)
+                received += len(chunk)
                 self.hub.publish(chunk)
         except (OSError, ValueError):
             pass
         finally:
+            if not received and self.mode == "temporary" and not self._stopped:
+                if self.streamlink is not None:
+                    try:
+                        self.streamlink.wait(timeout=2)
+                    except (subprocess.TimeoutExpired, OSError):
+                        pass
+                set_error(self.room, _friendly_streamlink_error(self._last_line) if self._last_line
+                          else "il flusso si è chiuso prima di inviare video")
             self.stop()
 
     def acquire(self) -> None:
@@ -264,7 +315,8 @@ def live_thumbnail(room: str) -> bytes | None:
             hub = source.hub
     if hub is None:
         return cached[1] if cached else None
-    image = storage.frame_from_bytes(hub.tail_bytes(3 * 1024 * 1024), label=room)
+    # Tutto il buffer: a 1080p60 (Kick, YouTube) pochi MB possono non contenere un fotogramma chiave.
+    image = storage.frame_from_bytes(hub.tail_bytes(LIVE_STREAM_BUFFER_BYTES), label=room)
     if image:
         with _thumb_lock:
             _thumb_cache[room] = (now, image)

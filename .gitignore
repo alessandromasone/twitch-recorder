@@ -22,3 +22,5 @@ dedup_hashes.json
 dedup_hashes.json.tmp
 channel_history.json
 .pytest_cache/
+backups/
+channels.json.danneggiato-*

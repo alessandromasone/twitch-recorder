@@ -418,6 +418,9 @@ def _watchdog_loop() -> None:
                     stale = [time.time() - t for t in state.monitor.inflight.values()]
                 if stale and max(stale) > 45:
                     logger.warning("Monitor degradato: controllo senza risposta da %.0fs", max(stale))
+            # Registrazioni rimaste appese (thread terminato ma stato ancora REC).
+            for rec in list(state.recorders.values()):
+                rec.heal_if_dead()
         except Exception as exc:
             logger.error("Errore watchdog: %s", exc)
 

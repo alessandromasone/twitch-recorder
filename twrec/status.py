@@ -24,12 +24,18 @@ VOLATILE = {"uptime", "uptime_human", "last_checked", "single_live_offline_remai
 
 
 def _thumb_url(name: str, platform: str, live: bool, recording: bool, meta: dict) -> str | None:
-    """Copertina: per Twitch l'immagine ufficiale (API Helix o CDN), per le altre il flusso in REC."""
+    """Copertina della scheda "In onda".
+
+    Twitch: immagine ufficiale (API Helix o CDN). Kick e YouTube: fotogramma del flusso in REC;
+    senza REC, YouTube usa la copertina pubblica della diretta, Kick resta senza immagine.
+    """
     if platform == "twitch" and live:
         template = meta.get("thumbnail_url") or f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{name}-{{width}}x{{height}}.jpg"
         return template.replace("{width}", "440").replace("{height}", "248")
     if recording:
         return f"/thumb/live/{name}.jpg"
+    if live and platform == "youtube" and meta.get("thumbnail_url"):
+        return meta["thumbnail_url"]
     return None
 
 
@@ -108,6 +114,7 @@ def _channel_dict(ch: dict, now: float) -> dict:
                   if assessment and live_now else None),
         "rerun_policy": ch.get("rerun_policy"),
         "rerun_policy_effective": rerun.effective_policy(ch),
+        "preview_error": preview.last_error(name),
         "preview_active": pv["active"],
         "preview_mode": pv["mode"],
         "preview_connections": pv["connections"],
@@ -217,6 +224,18 @@ def unsubscribe(q: queue.Queue) -> None:
         try:
             _subscribers.remove(q)
         except ValueError:
+            pass
+
+
+def close_all() -> None:
+    """Chiude tutti i flussi di aggiornamento (spegnimento)."""
+    with _sub_lock:
+        subscribers = list(_subscribers)
+        _subscribers.clear()
+    for q in subscribers:
+        try:
+            q.put_nowait(None)
+        except queue.Full:
             pass
 
 

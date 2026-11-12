@@ -346,3 +346,204 @@ def test_check_order_active_channels_before_paused():
     due = {"paused_old": 1, "active_new": 50, "forced": 99, "active_old": 10, "once": 70}
     chans.sort(key=lambda c: monitor.check_order(c, {"forced"}, due[c["name"]]))
     assert [c["name"] for c in chans] == ["forced", "once", "active_old", "active_new", "paused_old"]
+
+
+# ── Salvataggio sicuro e storico ──
+
+@pytest.fixture()
+def isolated_store(tmp_path, monkeypatch):
+    """channels.json e storico in una cartella a parte, senza toccare lo stato dei test."""
+    channels_file = tmp_path / "channels.json"
+    monkeypatch.setattr(state, "CHANNELS_FILE", str(channels_file))
+    monkeypatch.setattr(state, "BACKUP_DIR", str(tmp_path / "backups"))
+    monkeypatch.setattr(state, "_last_backup", None)
+    return channels_file
+
+
+def _entry(name, **extra):
+    return state.normalize_channel({"name": name, "platform": "twitch", "quality": "best", **extra})
+
+
+def test_atomic_write_leaves_no_temp_files(tmp_path):
+    from twrec.util import write_json_atomic
+    path = tmp_path / "x.json"
+    assert write_json_atomic(str(path), [{"a": 1}])
+    assert json.loads(path.read_text()) == [{"a": 1}]
+    assert [p.name for p in tmp_path.iterdir()] == ["x.json"]
+
+
+def test_backup_only_when_channels_or_state_change(isolated_store, monkeypatch):
+    monkeypatch.setattr(state, "CHANNELS_BACKUPS", 3)
+    chans = [_entry("one")]
+    state._write_backup(state._serialize(chans))
+    chans[0]["last_checked"] = time.time()          # solo un controllo: nessuna copia nuova
+    state._write_backup(state._serialize(chans))
+    assert len(state.list_backups()) == 1
+    for i in range(5):                              # 5 modifiche reali, ne restano 3
+        chans.append(_entry(f"extra{i}", sleeping=i % 2 == 0))
+        state._write_backup(state._serialize(chans))
+    backups = state.list_backups()
+    assert len(backups) == 3
+    assert backups[0]["channels"][-1]["name"] == "extra4"
+    assert set(backups[0]["channels"][0]) == set(state.BACKUP_FIELDS)
+
+
+def test_corrupt_channels_file_is_recovered_from_backup(isolated_store, monkeypatch):
+    monkeypatch.setattr(state, "CHANNELS_BACKUPS", 5)
+    state._write_backup(state._serialize([_entry("keep_me", is_recording=False)]))
+    isolated_store.write_bytes(b"")                 # come dopo uno spegnimento improvviso
+    chans = state.load_channels()
+    assert [c["name"] for c in chans] == ["keep_me"] and chans[0]["is_recording"] is False
+    names = [p.name for p in isolated_store.parent.iterdir()]
+    assert any(n.startswith("channels.json.danneggiato-") for n in names) and "channels.json" not in names
+
+
+def test_truncated_file_prefers_complete_temp_copy(isolated_store):
+    isolated_store.write_text('[{"name": "half"')
+    (isolated_store.parent / "channels.json.1.2.tmp").write_text(json.dumps([{"name": "from_tmp"}]))
+    assert [c["name"] for c in state.load_channels()] == ["from_tmp"]
+
+
+def test_restore_backup_api(client, isolated_store, monkeypatch):
+    monkeypatch.setattr(state, "CHANNELS_BACKUPS", 10)
+    _api(client, action="add", channel="r_keep", platform="kick", quality="720p")
+    _api(client, action="add", channel="r_gone", platform="kick")
+    state.flush()
+    first = state.list_backups()[0]["id"]
+    _api(client, action="remove", channel="r_gone")
+    _api(client, action="add", channel="r_new", platform="kick")
+    _api(client, action="sleep", channel="r_keep")
+    state.flush()
+    listing = client.get("/api/backups").get_json()
+    assert any(b["id"] == first for b in listing["backups"])
+    r = client.post("/api/backups/restore", json={"id": first}).get_json()
+    assert r["ok"], r
+    names = [c["name"] for c in state.channels if c["name"].startswith("r_")]
+    assert names == ["r_keep", "r_gone"]
+    keep = state.find_channel("r_keep")
+    assert keep["quality"] == "720p" and not keep["sleeping"] and keep["is_recording"]
+    assert client.post("/api/backups/restore", json={"id": "../channels.json"}).status_code == 404
+    for name in ("r_keep", "r_gone"):
+        _api(client, action="remove", channel=name)
+
+
+# ── Registrazioni che non devono restare appese ──
+
+@pytest.fixture(scope="session")
+def sample_ts(tmp_path_factory):
+    import subprocess
+    path = tmp_path_factory.mktemp("media") / "sample.ts"
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=25",
+         "-f", "lavfi", "-i", "sine=frequency=440", "-t", "3", "-c:v", "libx264", "-g", "25",
+         "-c:a", "aac", "-f", "mpegts", str(path)],
+        check=True, timeout=60,
+    )
+    return str(path)
+
+
+def _wait_until(predicate, timeout):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.1)
+    return predicate()
+
+
+@pytest.fixture()
+def recorder_env(monkeypatch, sample_ts):
+    from twrec import recorder
+    monkeypatch.setenv("FAKE_TS", sample_ts)
+    # Nessun controllo del monitor durante il test: si guida il Recorder a mano.
+    monkeypatch.setattr(recorder, "check_channel", lambda name, platform: CheckResult(False, True, "offline"))
+    monkeypatch.setattr(recorder, "RECONNECT_TRIES", 1)
+    monkeypatch.setattr(recorder, "RECONNECT_WAIT", 0)
+    monkeypatch.setattr(recorder.random, "uniform", lambda a, b: a)
+    return recorder
+
+
+def test_stalled_stream_is_closed(recorder_env, monkeypatch):
+    monkeypatch.setattr(recorder_env, "RECORDING_STALL_SECONDS", 2)
+    rec = recorder_env.Recorder("stallone", "best", "kick")
+    rec.start()
+    assert _wait_until(lambda: "Flusso fermo" in rec.last_error, 20), rec.last_error
+    assert _wait_until(lambda: not rec.is_recording, 20)
+    assert rec.process is None and rec.source_process is None
+
+
+def test_stop_kills_child_processes_holding_the_pipe(recorder_env):
+    rec = recorder_env.Recorder("childish", "best", "kick")
+    rec.start()
+    assert _wait_until(lambda: rec.output_path and rec._last_data > 0, 15)
+    started = time.time()
+    rec.stop(wait=15)
+    assert not rec.is_recording, "la registrazione è rimasta appesa dopo lo stop"
+    assert time.time() - started < 15
+
+
+def test_unexpected_error_does_not_leave_channel_in_rec(recorder_env, monkeypatch):
+    def boom(_self):
+        raise RuntimeError("errore inatteso")
+    monkeypatch.setattr(recorder_env.Recorder, "_session_loop", boom)
+    rec = recorder_env.Recorder("crashy", "best", "kick")
+    rec.start()
+    assert _wait_until(lambda: not rec.is_recording, 5)
+    rec.start()                                     # il canale può registrare di nuovo
+    assert _wait_until(lambda: not rec.is_recording, 5)
+
+
+def test_heal_if_dead_releases_stuck_recorder(recorder_env):
+    rec = recorder_env.Recorder("zombie", "best", "kick")
+    with rec._lock:
+        rec.is_recording = True
+        rec.started_at = time.time()
+        rec._thread = None
+    assert rec.heal_if_dead()
+    assert not rec.is_recording and not rec.heal_if_dead()
+
+
+def test_twitch_stall_limit_covers_ad_breaks(monkeypatch):
+    from twrec import recorder
+    monkeypatch.setattr(recorder, "RECORDING_STALL_SECONDS", 180)
+    monkeypatch.setattr(recorder, "SKIP_TWITCH_ADS", True)
+    assert recorder.stall_limit("twitch") == 300 and recorder.stall_limit("kick") == 180
+
+
+# ── Copertine ed errori della preview ──
+
+def test_youtube_cover_from_streamlink_metadata(monkeypatch):
+    import subprocess
+    from twrec import checks
+    payload = json.dumps({"plugin": "youtube", "metadata": {"id": "AbC_12-xyz", "author": "x", "title": "t"},
+                          "streams": {"best": {}}})
+    monkeypatch.setattr(checks.subprocess, "run",
+                        lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=payload, stderr=""))
+    result = checks.check_streamlink("somechannel", "youtube")
+    assert result.online and result.meta["thumbnail_url"] == "https://i.ytimg.com/vi/AbC_12-xyz/hqdefault_live.jpg"
+
+
+def test_status_cover_for_youtube_and_kick(client):
+    _api(client, action="add", channel="yt_cover", platform="youtube")
+    _api(client, action="add", channel="kick_cover", platform="kick")
+    state.online_status.update({"yt_cover": True, "kick_cover": True})
+    state.live_meta["yt_cover"] = {"title": "t", "thumbnail_url": "https://i.ytimg.com/vi/x/hqdefault_live.jpg"}
+    data = {c["name"]: c for c in client.get("/api/status").get_json()["channels"]}
+    assert data["yt_cover"]["thumb_url"].startswith("https://i.ytimg.com/")
+    assert data["kick_cover"]["thumb_url"] is None
+    r = client.get("/thumb/live/yt_cover.jpg")
+    assert r.status_code == 302 and "ytimg" in r.headers["Location"]
+    for name in ("yt_cover", "kick_cover"):
+        _api(client, action="remove", channel=name)
+
+
+def test_preview_error_reason_reaches_status(client):
+    from twrec import preview
+    _api(client, action="add", channel="offpreview", platform="kick")
+    r = client.get("/live/kick/offpreview")
+    body = r.get_data()           # streamlink finto: nessun flusso → la sorgente si chiude subito
+    assert r.status_code == 200 and not body
+    assert _wait_until(lambda: preview.last_error("offpreview"), 5)
+    ch = next(c for c in client.get("/api/status").get_json()["channels"] if c["name"] == "offpreview")
+    assert "nessun flusso" in ch["preview_error"]
+    _api(client, action="remove", channel="offpreview")

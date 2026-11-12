@@ -681,3 +681,15 @@ body.minimal .rec-live { display: inline; color: var(--tally-rec); font-weight: 
 }
 .covers-off .mon-screen .tally, .covers-off .mon-screen .viewers { z-index: 2; }
 .is-hidden-title { color: var(--faint) !important; font-style: italic; }
+
+/* Storico della lista */
+.backups { display: grid; gap: 6px; }
+.backup { border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; }
+.backup summary { display: flex; flex-wrap: wrap; gap: 2px 10px; justify-content: space-between; padding: 8px 0; cursor: pointer; font-size: 13px; }
+.backup summary::-webkit-details-marker { display: none; }
+.backup[open] summary { border-bottom: 1px solid var(--line); }
+.b-when { font-weight: 600; }
+.b-sum { font-size: 12.5px; }
+.b-rooms { list-style: none; margin: 8px 0; padding: 0; max-height: 220px; overflow-y: auto; font-size: 13px; }
+.b-rooms li { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
+.backup .btn { margin: 4px 0 10px; }

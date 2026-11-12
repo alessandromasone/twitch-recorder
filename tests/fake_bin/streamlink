@@ -6,7 +6,9 @@ if "--version" in args:
     print("streamlink 8.6.1"); sys.exit(0)
 url = next((a for a in args if a.startswith("http")), "")
 name = url.rstrip("/").split("/")[-1]
-live = name.startswith("live")
+# live* = flusso continuo; stall* = pochi dati e poi silenzio con la connessione aperta;
+# child* = come live ma con un processo figlio che tiene aperta la pipe (come il muxer FFmpeg).
+live = name.startswith(("live", "stall", "child"))
 if "--json" in args:
     if live:
         print(json.dumps({"plugin":"twitch","metadata":{"id":"1","author":name,"category":"Just Chatting","title":json.loads(os.environ.get("FAKE_TITLES","{}")).get(name,"Titolo di "+name)},"streams":{"720p":{},"best":{}}}))
@@ -22,6 +24,13 @@ if "--stdout" in args:
     with open(src, "rb") as fh:
         data = fh.read()
     out = sys.stdout.buffer
+    if name.startswith("child"):
+        import subprocess
+        subprocess.Popen(["sleep", "600"])   # eredita stdout come farebbe un muxer
+    if name.startswith("stall"):
+        out.write(data[:188 * 2000]); out.flush()
+        time.sleep(600)
+        sys.exit(0)
     try:
         while True:
             for i in range(0, len(data), 188*700):

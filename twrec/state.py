@@ -4,11 +4,15 @@ Tutte le strutture mutabili vivono qui; i moduli le modificano solo tenendo `loc
 """
 
 import atexit
+import glob
+import json
+import os
 import threading
 import time
+from datetime import datetime, timezone
 
-from .config import CHANNELS_FILE, STREAM_QUALITY, logger
-from .util import as_bool, coerce_timestamp, iso_timestamp, norm_platform, read_json, write_json_atomic
+from .config import BACKUP_DIR, CHANNELS_BACKUPS, CHANNELS_FILE, STREAM_QUALITY, logger
+from .util import as_bool, coerce_timestamp, iso_timestamp, norm_platform, write_json_atomic
 
 lock = threading.RLock()
 
@@ -97,12 +101,112 @@ def normalize_channel(ch: dict) -> dict:
     return ch
 
 
-def load_channels() -> list[dict]:
-    data = read_json(CHANNELS_FILE, [])
+class _Unreadable(Exception):
+    pass
+
+
+def _parse_channels_file(path: str) -> list[dict]:
+    """Legge una lista di canali; solleva _Unreadable se il file è vuoto, troncato o non valido."""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise _Unreadable(str(exc)) from None
+    if isinstance(data, dict) and isinstance(data.get("channels"), list):
+        data = data["channels"]   # formato dei backup
     if not isinstance(data, list):
-        logger.error("Il file %s deve contenere una lista JSON", CHANNELS_FILE)
+        raise _Unreadable("il contenuto non è una lista di canali")
+    return [normalize_channel(dict(ch)) for ch in data if isinstance(ch, dict) and ch.get("name")]
+
+
+def load_channels() -> list[dict]:
+    """Carica channels.json. Se è illeggibile (per esempio dopo uno spegnimento improvviso)
+    lo mette da parte e recupera la lista dalla copia più recente dello storico."""
+    if not os.path.exists(CHANNELS_FILE):
         return []
-    return [normalize_channel(ch) for ch in data if isinstance(ch, dict) and ch.get("name")]
+    try:
+        return _parse_channels_file(CHANNELS_FILE)
+    except _Unreadable as exc:
+        logger.error("%s non è leggibile (%s): provo a recuperarlo", CHANNELS_FILE, exc)
+    damaged = f"{CHANNELS_FILE}.danneggiato-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    try:
+        os.replace(CHANNELS_FILE, damaged)
+        logger.warning("File danneggiato conservato come %s", os.path.basename(damaged))
+    except OSError:
+        pass
+    # Un salvataggio interrotto può aver lasciato un temporaneo completo, più recente dei backup.
+    candidates = sorted(glob.glob(CHANNELS_FILE + ".*.tmp") + glob.glob(CHANNELS_FILE + ".tmp"),
+                        key=os.path.getmtime, reverse=True)
+    candidates += [b["path"] for b in list_backups()]
+    for path in candidates:
+        try:
+            channels_found = _parse_channels_file(path)
+        except _Unreadable:
+            continue
+        logger.warning("Lista canali recuperata da %s (%d canali)", os.path.basename(path), len(channels_found))
+        return channels_found
+    logger.error("Nessuna copia valida trovata: si riparte con una lista vuota")
+    return []
+
+
+# ── Storico (backup) ──
+# Ogni volta che cambia la lista dei canali o il loro stato (nome, piattaforma, qualità,
+# registrazione, a dormire, Una volta, rerun) si salva una copia; restano le ultime
+# CHANNELS_BACKUPS. Gli aggiornamenti dei controlli (ultimo controllo, ultima live…) non creano copie.
+
+BACKUP_FIELDS = ("name", "platform", "quality", "is_recording", "sleeping", "single_live_mode", "rerun_policy")
+_last_backup: list | None = None
+
+
+def _essentials(data: list[dict]) -> list[dict]:
+    return [{k: ch.get(k) for k in BACKUP_FIELDS} for ch in data]
+
+
+def list_backups() -> list[dict]:
+    """Copie dello storico, dalla più recente."""
+    try:
+        names = [n for n in os.listdir(BACKUP_DIR) if n.startswith("channels-") and n.endswith(".json")]
+    except OSError:
+        return []
+    out = []
+    for name in sorted(names, reverse=True):
+        path = os.path.join(BACKUP_DIR, name)
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            items = data.get("channels") if isinstance(data, dict) else None
+            if not isinstance(items, list):
+                continue
+        except (OSError, ValueError):
+            continue
+        out.append({"id": name, "path": path, "saved_at": data.get("saved_at"), "channels": items})
+    return out
+
+
+def read_backup(backup_id: str) -> list[dict] | None:
+    if os.path.basename(backup_id) != backup_id:
+        return None
+    return next((b["channels"] for b in list_backups() if b["id"] == backup_id), None)
+
+
+def _write_backup(payload: list[dict]) -> None:
+    global _last_backup
+    if CHANNELS_BACKUPS <= 0:
+        return
+    essentials = _essentials(payload)
+    if essentials == _last_backup:
+        return
+    now = datetime.now(timezone.utc)
+    name = f"channels-{now.strftime('%Y%m%d-%H%M%S-%f')}.json"
+    data = {"saved_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "channels": essentials}
+    if not write_json_atomic(os.path.join(BACKUP_DIR, name), data):
+        return
+    _last_backup = essentials
+    for old in list_backups()[CHANNELS_BACKUPS:]:
+        try:
+            os.remove(old["path"])
+        except OSError:
+            pass
 
 
 def _serialize(data: list[dict]) -> list[dict]:
@@ -132,7 +236,8 @@ def flush() -> None:
         with lock:
             payload = _serialize(channels)
             _dirty.clear()
-        write_json_atomic(CHANNELS_FILE, payload)
+        if write_json_atomic(CHANNELS_FILE, payload):
+            _write_backup(payload)
 
 
 def _saver_loop() -> None:
@@ -146,7 +251,15 @@ def _saver_loop() -> None:
 
 
 def init() -> None:
+    global _last_backup
+    latest = list_backups()[:1]
+    _last_backup = latest[0]["channels"] if latest else None
     channels[:] = load_channels()
+    for leftover in glob.glob(CHANNELS_FILE + ".*.tmp") + glob.glob(CHANNELS_FILE + ".tmp"):
+        try:
+            os.remove(leftover)   # temporanei di salvataggi interrotti (già considerati sopra)
+        except OSError:
+            pass
     for ch in channels:
         online_status[ch["name"]] = ch.get("last_status") == "online"
         last_checked[ch["name"]] = float(ch.get("last_checked") or 0)

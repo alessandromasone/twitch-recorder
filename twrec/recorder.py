@@ -2,6 +2,7 @@
 
 import os
 import random
+import signal
 import subprocess
 import threading
 import time
@@ -10,7 +11,7 @@ from . import notify, state, storage
 from .checks import PRIVATE_PHRASES, check_channel, streamlink_base_command
 from .config import (
     DEFAULT_PLATFORM, MAX_FILE_SIZE, RECONNECT_TRIES, RECONNECT_WAIT, RECORDING_LOG_MAX_MB,
-    RECORDING_LOGS, RECORDINGS_DIR, logger,
+    RECORDING_LOGS, RECORDING_STALL_SECONDS, RECORDINGS_DIR, SKIP_TWITCH_ADS, logger,
 )
 from .hub import LiveStreamHub
 from .quality import fallback_list, parse_opened_quality
@@ -73,18 +74,44 @@ def open_channel_log(channel_name: str):
         return None
 
 
+def _signal_group(proc: subprocess.Popen, sig: int) -> None:
+    """Segnale a tutto il gruppo del processo (avviato con start_new_session): così si chiudono
+    anche i figli, come l'FFmpeg che Streamlink avvia per YouTube, che altrimenti terrebbero
+    aperta la pipe e lascerebbero la registrazione appesa."""
+    try:
+        os.killpg(proc.pid, sig)
+    except (OSError, ProcessLookupError):
+        try:
+            proc.send_signal(sig)
+        except OSError:
+            pass
+
+
 def terminate(proc: subprocess.Popen | None, wait: float = 3) -> None:
+    """Chiude un processo e i suoi figli senza mai bloccarsi né sollevare eccezioni."""
     if proc is None or proc.poll() is not None:
         return
+    _signal_group(proc, signal.SIGTERM)
     try:
-        proc.terminate()
         proc.wait(timeout=wait)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    _signal_group(proc, signal.SIGKILL)
+    try:
+        proc.wait(timeout=3)
     except (OSError, subprocess.TimeoutExpired):
-        try:
-            proc.kill()
-            proc.wait(timeout=2)
-        except (OSError, subprocess.TimeoutExpired):
-            pass
+        pass
+
+
+def stall_limit(platform: str) -> int:
+    """Secondi senza dati dopo cui la registrazione è considerata ferma (0 = mai)."""
+    if not RECORDING_STALL_SECONDS:
+        return 0
+    if norm_platform(platform) == "twitch" and SKIP_TWITCH_ADS:
+        # Con le pubblicità filtrate Streamlink non invia nulla per tutta la pausa pubblicitaria.
+        return max(RECORDING_STALL_SECONDS, 300)
+    return RECORDING_STALL_SECONDS
 
 
 class Recorder:
@@ -105,6 +132,7 @@ class Recorder:
         self.shared_stream: LiveStreamHub | None = None
         self.reconnect_attempts = 0
         self.last_error = ""
+        self._last_data = 0.0
 
     # ── ciclo di vita ──
 
@@ -123,22 +151,61 @@ class Recorder:
         notify.send("rec_start", self.channel_name, f"Registrazione avviata a {self.quality}")
         state.request_broadcast()
 
-    def stop(self) -> None:
+    def stop(self, wait: float = 0) -> None:
+        """Ferma la registrazione. Con `wait` attende fino a quei secondi che il file sia chiuso."""
         with self._lock:
             if not self.is_recording:
                 return
             self.stop_requested = True
-            children = (self.process, self.source_process)
+            children = (self.source_process, self.process)
             hub = self.shared_stream
+            thread = self._thread
+        # Prima Streamlink (FFmpeg riceve EOF e chiude il file), poi FFmpeg se serve.
         for child in children:
             if child and child.poll() is None:
-                try:
-                    child.terminate()
-                except OSError:
-                    pass
+                _signal_group(child, signal.SIGTERM)
         if hub:
             hub.close()
         logger.info("⏹ Stop: %s", self.channel_name)
+        if wait and thread and thread is not threading.current_thread():
+            thread.join(timeout=wait)
+
+    def heal_if_dead(self) -> bool:
+        """Rete di sicurezza: se il thread di registrazione è morto ma lo stato dice ancora REC,
+        chiude i processi rimasti e libera il canale per una nuova registrazione."""
+        with self._lock:
+            thread = self._thread
+            if not self.is_recording or (thread is not None and thread.is_alive()):
+                return False
+            children = (self.process, self.source_process)
+            hub = self.shared_stream
+            self.process = self.source_process = self.shared_stream = None
+            self.is_recording = False
+            self.started_at = None
+        logger.error("🩹 %s: registrazione rimasta appesa senza thread attivo — la chiudo", self.channel_name)
+        for child in children:
+            terminate(child)
+        if hub:
+            hub.close()
+        storage.index.invalidate()
+        state.request_broadcast()
+        return True
+
+    def _stall_watch(self, source: subprocess.Popen, process: subprocess.Popen, done: threading.Event) -> None:
+        """Chiude Streamlink e FFmpeg se non arrivano dati per troppo tempo: un flusso morto con la
+        connessione ancora aperta non deve lasciare la registrazione appesa per sempre."""
+        limit = stall_limit(self.platform)
+        if not limit:
+            return
+        while not done.wait(5):
+            idle = time.time() - self._last_data
+            if idle >= limit:
+                logger.warning("📡 %s: nessun dato da %ds — chiudo e ricontrollo il canale",
+                               self.channel_name, int(idle))
+                self.last_error = f"Flusso fermo da {int(idle)} s: riconnessione"
+                terminate(source)
+                terminate(process)
+                return
 
     @property
     def uptime(self) -> float:
@@ -176,6 +243,29 @@ class Recorder:
             self._write_session_meta(os.path.basename(path))
 
     def _manager_loop(self) -> None:
+        """Esegue la sessione e, qualunque cosa succeda, la chiude: un errore imprevisto non deve
+        lasciare il canale bloccato in REC (che impedirebbe anche le registrazioni successive)."""
+        try:
+            self._session_loop()
+        except Exception:
+            logger.exception("Errore imprevisto nella registrazione di %s", self.channel_name)
+        finally:
+            with self._lock:
+                hub = self.shared_stream
+                self.shared_stream = None
+                self.is_recording = False
+                self.started_at = None
+                children = (self.process, self.source_process)
+                self.process = self.source_process = None
+            if hub:
+                hub.close()
+            for child in children:
+                terminate(child)
+            notify.send("rec_end", self.channel_name, "Registrazione terminata")
+            storage.index.invalidate()
+            state.request_broadcast()
+
+    def _session_loop(self) -> None:
         error_start: float | None = None
         while not self.stop_requested:
             with self._lock:
@@ -196,6 +286,7 @@ class Recorder:
             exit_code = None
             log_fh = None
             written = 0
+            segment_done = threading.Event()
             split_threshold = max(int(MAX_FILE_SIZE * 0.97), MAX_FILE_SIZE - 20 * 1024 * 1024) if MAX_FILE_SIZE > 0 else 0
             try:
                 log_fh = open_channel_log(self.channel_name)
@@ -215,6 +306,9 @@ class Recorder:
                         terminate(source)
                     self._write_session_meta(filename)
                     storage.index.invalidate()
+                    self._last_data = time.time()
+                    threading.Thread(target=self._stall_watch, args=(source, process, segment_done),
+                                     daemon=True, name=f"rec-stall-{self.channel_name}").start()
                     stdout = process.stdout
                     # Si legge fino a EOF anche dopo Stop: FFmpeg scarica gli ultimi pacchetti.
                     while True:
@@ -224,6 +318,7 @@ class Recorder:
                         out.write(chunk)
                         hub.publish(chunk)
                         written += len(chunk)
+                        self._last_data = time.time()
                         if split_threshold and written >= split_threshold and not self._split_triggered:
                             logger.info("Split %s (%s)", filename, human_size(written))
                             self._split_triggered = True
@@ -234,12 +329,13 @@ class Recorder:
                     try:
                         exit_code = process.wait(timeout=5)
                     except subprocess.TimeoutExpired:
-                        process.kill()
-                        exit_code = process.wait(timeout=3)
+                        terminate(process)
+                        exit_code = process.poll()
             except Exception as exc:
                 self.last_error = f"Errore acquisizione/remux: {exc}"[:300]
                 logger.error("Errore acquisizione/remux %s: %s", self.channel_name, exc)
             finally:
+                segment_done.set()
                 terminate(process)
                 terminate(source)
                 for proc in (process, source):
@@ -290,24 +386,6 @@ class Recorder:
             self.last_error = ""
             logger.info("Fine segmento %s dopo %s — riavvio.", self.channel_name, fmt_duration(elapsed))
             time.sleep(1)
-
-        with self._lock:
-            hub = self.shared_stream
-            self.shared_stream = None
-            self.is_recording = False
-            self.started_at = None
-            children = (self.process, self.source_process)
-            self.process = self.source_process = None
-        if hub:
-            hub.close()
-        for child in children:
-            if child and child.poll() is None:
-                try:
-                    child.terminate()
-                except OSError:
-                    pass
-        notify.send("rec_end", self.channel_name, "Registrazione terminata")
-        state.request_broadcast()
 
     def _smart_retry(self) -> bool:
         for attempt in range(RECONNECT_TRIES):

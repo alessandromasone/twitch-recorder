@@ -289,3 +289,53 @@ def bulk(names: list[str], op: str, value=None) -> dict:
         except ActionError as exc:
             failed.append({"channel": name, "msg": exc.msg})
     return {"ok": not failed, "done": done, "failed": failed}
+
+
+def restore_backup(backup_id: str) -> str:
+    """Riporta la lista dei canali (nome, piattaforma, qualità e stato) a una copia dello storico.
+
+    I canali assenti nella copia vengono rimossi (le registrazioni su disco restano), quelli
+    mancanti aggiunti; per gli altri si ripristinano qualità e stato. La lista attuale finisce
+    a sua volta nello storico, quindi il ripristino si può annullare.
+    """
+    items = state.read_backup(backup_id)
+    if items is None:
+        raise ActionError("Copia non trovata.", 404)
+    wanted = [state.normalize_channel(dict(r)) for r in items if isinstance(r, dict) and r.get("name")]
+    state.flush()   # la lista attuale entra nello storico prima di essere sostituita
+    with state.lock:
+        current = {c["name"]: c.get("platform") for c in state.channels}
+    for name, platform in current.items():
+        target = next((r for r in wanted if r["name"] == name), None)
+        if target is None or target["platform"] != platform:
+            remove_channel(name)
+    for item in wanted:
+        name = item["name"]
+        if not state.find_channel(name):
+            add_channel(name, item["platform"], item["quality"], {
+                "is_recording": item["is_recording"], "sleeping": item["sleeping"],
+                "single_live_mode": item["single_live_mode"], "rerun_policy": item.get("rerun_policy"),
+            })
+            continue
+        if item["quality"] in QUALITY_OPTIONS:
+            change_quality(name, item["quality"])
+        if item["sleeping"]:
+            set_sleep(name, True)
+        else:
+            with state.lock:
+                was_sleeping = bool(state.find_channel(name).get("sleeping"))
+            if was_sleeping:
+                set_sleep(name, False)
+            set_recording(name, item["is_recording"])
+            with state.lock:
+                once_now = bool(state.find_channel(name).get("single_live_mode"))
+            if once_now != bool(item["single_live_mode"]):
+                toggle_single_live(name)
+        with state.lock:
+            state.find_channel(name)["rerun_policy"] = item.get("rerun_policy")
+    # Stesso ordine della copia.
+    with state.lock:
+        position = {r["name"]: i for i, r in enumerate(wanted)}
+        state.channels.sort(key=lambda c: position.get(c["name"], len(position)))
+    _done()
+    return f"Lista ripristinata: {len(wanted)} canali."

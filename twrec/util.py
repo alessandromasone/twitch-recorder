@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import threading
 from datetime import datetime, timezone
 
 from .config import DEFAULT_PLATFORM, PLATFORMS, logger
@@ -100,16 +101,40 @@ def read_json(path: str, default):
         return default
 
 
-def write_json_atomic(path: str, data, indent: int | None = 2) -> bool:
-    tmp = path + ".tmp"
+def _fsync_dir(path: str) -> None:
+    """Rende persistente la rinomina: senza, dopo uno spegnimento improvviso il file può sparire."""
     try:
-        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+def write_json_atomic(path: str, data, indent: int | None = 2) -> bool:
+    """Scrittura sicura anche in caso di spegnimento improvviso.
+
+    Il contenuto va in un file temporaneo, viene forzato su disco (fsync) e solo allora
+    sostituisce l'originale con una rinomina atomica: in ogni momento sul disco c'è il file
+    vecchio completo oppure quello nuovo completo, mai un file vuoto o troncato.
+    """
+    directory = os.path.dirname(os.path.abspath(path))
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+    try:
+        os.makedirs(directory, exist_ok=True)
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=indent, ensure_ascii=False)
             fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
         os.replace(tmp, path)
+        _fsync_dir(directory)
         return True
-    except OSError as exc:
+    except (OSError, TypeError, ValueError) as exc:
         logger.error("Impossibile salvare %s: %s", path, exc)
         try:
             os.remove(tmp)

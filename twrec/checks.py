@@ -85,6 +85,10 @@ def check_streamlink(channel_name: str, platform: str) -> CheckResult:
         md = parsed["metadata"]
         meta = {"title": md.get("title") or "", "game": md.get("category") or "",
                 "display_name": md.get("author"), "source": "streamlink"}
+        video_id = str(md.get("id") or "")
+        if platform == "youtube" and video_id and video_id.replace("-", "").replace("_", "").isalnum():
+            # Copertina pubblica della diretta YouTube, senza API né credenziali.
+            meta["thumbnail_url"] = f"https://i.ytimg.com/vi/{video_id}/hqdefault_live.jpg"
 
     streams = parsed.get("streams") if isinstance(parsed, dict) else None
     if isinstance(streams, (dict, list)):

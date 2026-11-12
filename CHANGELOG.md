@@ -7,12 +7,31 @@ diventa automaticamente la nota della GitHub Release quando si pubblica il tag `
 
 - Nessuna modifica.
 
+## 2.2.0
+
+- **Salvataggio sicuro di `channels.json`**: ogni scrittura viene forzata su disco prima di sostituire il file, così uno spegnimento improvviso non lascia più un file vuoto o troncato.
+- **Recupero automatico**: se all'avvio `channels.json` è illeggibile viene conservato come `channels.json.danneggiato-<data>` e la lista si recupera dal salvataggio interrotto o dalla copia più recente dello storico.
+- **Storico della lista**: a ogni modifica di canali o stato (nome, piattaforma, qualità, REC, pausa, a dormire, Una volta, politica rerun) si salva una copia in `backups/`, tenendo le ultime 10 (`CHANNELS_BACKUPS`). I controlli periodici non creano copie. Dalle impostazioni si vedono le copie e se ne può ripristinare una.
+- **Seleziona tutti** nella selezione multipla: seleziona (o deseleziona) tutti i canali visibili con il filtro e la ricerca correnti.
+- **Registrazioni che restavano appese**:
+  - lo stop chiude Streamlink insieme ai suoi processi figli (per esempio l'FFmpeg che usa per YouTube): prima potevano tenere aperto il flusso e la registrazione non si chiudeva più;
+  - se non arrivano dati per 180 secondi (`RECORDING_STALL_SECONDS`; su Twitch con le pubblicità filtrate almeno 300) la registrazione viene chiusa e il canale ricontrollato;
+  - un errore imprevisto nel thread di registrazione non lascia più il canale bloccato in REC; il watchdog libera comunque eventuali registrazioni rimaste senza thread;
+  - allo stop del container le registrazioni vengono chiuse subito e in parallelo e si attende che i file siano chiusi (`stop_grace_period: 45s` nei docker-compose).
+- **Kick e YouTube**:
+  - copertine dal flusso in REC più affidabili ad alta risoluzione: il buffer condiviso passa a 8 MB (`LIVE_STREAM_BUFFER_BYTES`) e il fotogramma si cerca in tutto il buffer;
+  - YouTube ha la copertina pubblica della diretta anche senza registrazione;
+  - se la preview non parte il player mostra il motivo (rifiuto 403 della piattaforma, diretta appena finita, diretta privata) invece di un generico «connessione interrotta».
+
+## 2.1.1
+
+- Ordine dei controlli: prima quelli chiesti a mano e i canali in REC, poi quelli con la registrazione attiva, infine quelli in pausa (con Helix i canali Twitch restano in un'unica richiesta).
+- Colonna Registrazioni: lista vuota con margini corretti, intestazione centrata e righe allineate (niente più spazio riservato alla barra di scorrimento).
+
 ## 2.1.0
 
 - `RECORDING_LOGS=false` disattiva i file di log per canale (`recordings/.<canale>.log`) ed elimina all'avvio quelli rimasti; `RECORDING_LOG_MAX_MB` (predefinito 5) li ruota in `.log.1`, così non crescono più senza limiti.
 - Le miniature dei file conclusi non vengono più salvate su disco: si generano al volo e restano solo in memoria (al massimo 300). La vecchia cartella `recordings/.thumbs` viene eliminata all'avvio.
-- Ordine dei controlli: prima quelli chiesti a mano e i canali in REC, poi quelli con la registrazione attiva, infine quelli in pausa (con Helix i canali Twitch restano in un'unica richiesta).
-- Colonna Registrazioni: lista vuota con margini corretti, intestazione centrata e righe allineate (niente più spazio riservato alla barra di scorrimento).
 - I metadati delle registrazioni passano da `recordings/.recordings_meta.json` a `recordings_meta.json` accanto a `channels.json` (spostati automaticamente).
 
 ## 2.0.0

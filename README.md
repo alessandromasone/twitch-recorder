@@ -62,12 +62,17 @@ Ogni scheda e riga ha i comandi sempre visibili:
 | Freccia circolare | Controlla subito il canale. |
 | ⋯ | Dettagli: qualità, politica rerun, diagnostica, rimozione. |
 
-Selezione multipla (tasto `s`), ricerca per nome, titolo o gioco, filtri con contatori, import ed export in JSON o CSV dalle impostazioni.
+Selezione multipla (tasto `s`, con «Seleziona tutti» sui canali visibili), ricerca per nome, titolo o gioco, filtri con contatori, import ed export in JSON o CSV dalle impostazioni.
 
 ### Registrazioni
 Raggruppate per giorno, con miniatura, durata, titolo e categoria della live ed eventuale segnalazione rerun. Si possono guardare nel browser, scaricare o eliminare; un file in registrazione non si può eliminare.
 
 Sotto `MIN_FREE_GB` di spazio libero (predefinito 2) non partono nuove registrazioni, e la barra in alto lo segnala; quelle già in corso continuano.
+
+### Spegnimenti improvvisi e storico
+`channels.json` viene scritto in un file temporaneo, forzato su disco e solo allora sostituito: dopo uno spegnimento improvviso resta il file precedente completo oppure quello nuovo, mai un file vuoto. Se all'avvio il file risulta comunque illeggibile, viene conservato come `channels.json.danneggiato-<data>` e la lista si recupera dall'ultimo salvataggio interrotto o dalla copia più recente dello storico.
+
+Lo storico (`backups/` accanto a `channels.json`) tiene le ultime `CHANNELS_BACKUPS` copie (predefinito 10) di nome, piattaforma, qualità e stato di ogni canale. Una copia nuova nasce solo quando cambia qualcosa che conta, non a ogni controllo. Dalle impostazioni (*Storico della lista*) vedi le copie e puoi ripristinarne una: i canali che non contiene vengono tolti dalla lista, le registrazioni restano sul disco, e la lista attuale finisce a sua volta nello storico.
 
 ### Player
 Durante la REC il player usa il flusso già scaricato; altrimenti apre un flusso temporaneo, condiviso fra tutte le finestre e chiuso quando l'ultima viene chiusa. Non crea mai file.
@@ -128,6 +133,7 @@ Tutte le variabili sono opzionali; l'elenco completo con i commenti è in [`.env
 | `FILE_EXTENSION` / `FILENAME_FORMAT` | `.ts` / `{name}_{timestamp}{ext}` | Nome dei file |
 | `STREAM_QUALITY` | `best` | Qualità predefinita per i nuovi canali |
 | `MAX_FILE_SIZE` | `1932735283` | Dimensione oltre cui il file viene diviso (~1,8 GB) |
+| `CHANNELS_BACKUPS` | `10` | Copie della lista canali nello storico (`backups/`); `0` disattiva |
 | `MIN_FREE_GB` | `2` | Sotto questo spazio libero non partono nuove REC; `0` disattiva |
 | `APP_PASSWORD` | _(vuota)_ | Password del pannello; vuota = nessun login |
 | `SECRET_KEY` | generata | Chiave delle sessioni |
@@ -158,7 +164,8 @@ Helix segnala l'inizio di una live con qualche decina di secondi di ritardo. Abb
 | `OFFLINE_CONFIRMATIONS` / `OFFLINE_CONFIRM_INTERVAL` | `3` / `5` | Conferme necessarie per chiudere una live |
 | `RECORDER_OFFLINE_GRACE_SECONDS` | `15` | Attesa extra prima di fermare la REC |
 | `RECONNECT_WAIT` / `RECONNECT_TRIES` | `30` / `3` | Riconnessione quando il flusso cade |
-| `LIVE_STREAM_BUFFER_BYTES` | `4194304` | Buffer RAM condiviso fra REC e preview |
+| `LIVE_STREAM_BUFFER_BYTES` | `8388608` | Buffer RAM condiviso fra REC e preview (abbastanza per una copertina anche a 1080p60) |
+| `RECORDING_STALL_SECONDS` | `180` | Se non arrivano dati per questi secondi la REC viene chiusa e il canale ricontrollato (su Twitch con `SKIP_TWITCH_ADS` almeno 300, per le pause pubblicitarie); `0` disattiva |
 | `PREVIEW_STARTUP_TIMEOUT_SECONDS` / `PREVIEW_IDLE_TIMEOUT_SECONDS` | `120` / `180` | Tolleranza della preview (per esempio durante le pubblicità) |
 | `PREVIEW_LINGER_SECONDS` | `10` | La sorgente temporanea resta aperta dopo l'ultimo spettatore |
 | `AUTO_CONVERT` / `DELETE_AFTER_CONVERT` | `false` / `false` | Remux TS→MP4 a fine file; elimina il TS solo se la conversione riesce |

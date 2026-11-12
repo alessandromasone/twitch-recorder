@@ -472,10 +472,15 @@
     }
   }
 
-  function renderChannels() {
+  // Canali visibili con il filtro e la ricerca correnti.
+  function visibleChannels() {
     const term = ($("#search").value || "").trim().toLocaleLowerCase();
-    const visible = S.order.map((n) => S.channels.get(n)).filter(Boolean)
+    return S.order.map((n) => S.channels.get(n)).filter(Boolean)
       .filter((c) => matchesFilter(c) && matchesSearch(c, term));
+  }
+  function renderChannels() {
+    const visible = visibleChannels();
+    if (S.selecting) updateBulkbar();
     let onAir = visible.filter(isOnAir).sort(sorterFor("wall"));
     let others = visible.filter((c) => !isOnAir(c)).sort(sorterFor("list"));
     if (isMinimal()) {
@@ -677,6 +682,32 @@
       </div>`;
   }
 
+  async function loadBackups() {
+    const box = $("#backups");
+    if (!box) return;
+    let data;
+    try {
+      const r = await fetch("/api/backups", { credentials: "same-origin" });
+      if (r.status === 401) return goToLogin();
+      data = await r.json();
+    } catch { box.innerHTML = `<p class="muted">Storico non disponibile.</p>`; return; }
+    const list = data.backups || [];
+    if (!list.length) {
+      box.innerHTML = `<p class="muted" style="font-size:13px">${data.keep ? "Ancora nessuna copia: la prima si crea alla prossima modifica." : "Storico disattivato (CHANNELS_BACKUPS=0)."}</p>`;
+      return;
+    }
+    box.innerHTML = list.map((b, i) => {
+      const when = b.saved_at ? new Date(b.saved_at).toLocaleString("it-IT", { dateStyle: "medium", timeStyle: "medium" }) : b.id;
+      const parts = [`${b.count} canali`, b.recording ? `${b.recording} in REC` : "", b.paused ? `${b.paused} in pausa` : "", b.sleeping ? `${b.sleeping} a dormire` : ""].filter(Boolean).join(", ");
+      const rows = b.channels.map((c) => `<li><span>${esc(c.name)}</span><span class="muted">${esc(c.state)}</span></li>`).join("");
+      return `<details class="backup">
+        <summary><span class="b-when">${esc(when)}${i === 0 ? ' <span class="muted">(attuale)</span>' : ""}</span><span class="b-sum muted">${esc(parts)}</span></summary>
+        <ul class="b-rooms">${rows}</ul>
+        ${i === 0 ? "" : `<button class="btn btn-ghost" type="button" data-cmd="restore-backup" data-id="${esc(b.id)}">${icon("refresh")}Ripristina questa copia</button>`}
+      </details>`;
+    }).join("");
+  }
+
   function renderSettings(body) {
     const c = S.config;
     $("#drawerTitle").textContent = "Impostazioni e strumenti";
@@ -700,6 +731,11 @@
         </div>
         <label style="display:flex;gap:8px;margin-top:10px;font-size:13px"><input type="checkbox" id="importUpdateQuality"> Aggiorna la qualità dei canali già presenti</label>
         <p class="muted" id="importResult" style="font-size:13px"></p>
+      </div>
+      <div class="group">
+        <h3>Storico della lista</h3>
+        <p class="muted" style="font-size:12.5px;margin-top:0">A ogni modifica di canali o stato si salva una copia (nome, piattaforma, qualità e stato). Ripristinarne una non tocca le registrazioni.</p>
+        <div class="backups" id="backups"><p class="muted" style="font-size:13px">Caricamento…</p></div>
       </div>
       <div class="group">
         <h3>Configurazione attiva</h3>
@@ -734,6 +770,7 @@
         <h3>Scorciatoie</h3>
         <dl class="kv"><dt><kbd>/</kbd></dt><dd>Cerca</dd><dt><kbd>Esc</kbd></dt><dd>Chiudi pannello o player</dd><dt><kbd>s</kbd></dt><dd>Selezione multipla</dd><dt><kbd>h</kbd></dt><dd>Nascondi o mostra copertine e video</dd></dl>
       </div>`;
+    loadBackups();
   }
 
   // ── Player ──
@@ -830,7 +867,7 @@
         const reason = type === mpegts.ErrorTypes?.MEDIA_ERROR ? "errore di decodifica"
           : /HttpStatusCodeInvalid/i.test(detail) ? `il server ha risposto ${info?.code || "con un errore"}`
             : /Timeout/i.test(detail) ? "nessuna risposta dal server" : "connessione interrotta";
-        if (src.live) pReconnect(reason);
+        if (src.live) pReconnect(reason, Number(info?.code) || 0);
         else pStatus("Il file non si può riprodurre nel browser. Puoi scaricarlo.", { error: true });
       });
       m.load();
@@ -865,12 +902,15 @@
     pSync();
   }
 
-  function pReconnect(reason) {
+  function pReconnect(reason, status) {
     if (!P.src?.live || P.timers.retry) return;
+    // Motivo fornito dal server (es. 403 della piattaforma o diretta appena finita).
+    const ch = P.src.channel ? S.channels.get(P.src.channel.name) : null;
+    if (status === 503 && ch?.preview_error) reason = ch.preview_error;
     clearInterval(P.timers.watch);
     if (P.tries >= MAX_TRIES) {
       pDetach();
-      pStatus(`La diretta non risponde (${reason}).`, { error: true, retry: true });
+      pStatus(`La diretta non risponde: ${reason}.`, { error: true, retry: true });
       return;
     }
     P.tries++;
@@ -1189,6 +1229,20 @@
     $("#bulkbar").hidden = !S.selecting;
     $("#bulkCount").textContent = S.selected.size === 1 ? "1 selezionato" : `${S.selected.size} selezionati`;
     $$("#bulkbar [data-bulk], #bulkbar select").forEach((b) => { b.disabled = !S.selected.size; });
+    // "Seleziona tutti" agisce sui canali visibili (filtro e ricerca correnti).
+    const visible = visibleChannels();
+    const all = visible.length > 0 && visible.every((c) => S.selected.has(c.name));
+    const btn = $("#bulkAll");
+    btn.textContent = all ? "Deseleziona tutti" : `Seleziona tutti (${visible.length})`;
+    btn.disabled = !visible.length;
+    btn.setAttribute("aria-pressed", String(all));
+  }
+  function toggleSelectAll() {
+    const visible = visibleChannels();
+    const all = visible.length > 0 && visible.every((c) => S.selected.has(c.name));
+    for (const c of visible) { if (all) S.selected.delete(c.name); else S.selected.add(c.name); }
+    updateBulkbar();
+    scheduleRender();
   }
   async function runBulk(op, value) {
     const names = [...S.selected];
@@ -1245,8 +1299,16 @@
         case "close-drawer": return closeDrawer();
         case "close-player": return closePlayer();
         case "select-mode": return setSelecting(!S.selecting);
+        case "select-all": return toggleSelectAll();
         case "check-all": { const r = await api("/api/check", {}); return toast(`Controlli in coda: ${r.queued ?? 0}.`); }
         case "pause-all": return act(api("/api/room", { action: "pause_all" }));
+        case "restore-backup": {
+          if (!(await confirmDialog("Ripristinare questa copia? I canali che non contiene vengono rimossi dalla lista (le registrazioni restano sul disco); la lista attuale resta nello storico.", "Ripristina"))) return;
+          const r = await api("/api/backups/restore", { id: cmd.dataset.id });
+          toast(r.msg || (r.ok ? "Lista ripristinata." : "Ripristino non riuscito."), r.ok ? undefined : "err");
+          setTimeout(loadBackups, 2500);
+          return;
+        }
         case "resume-all": return act(api("/api/room", { action: "resume_all" }));
         case "import": return $("#importFile")?.click();
         case "toggle-add": {

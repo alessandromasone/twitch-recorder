@@ -72,6 +72,10 @@ DELETE_AFTER_CONVERT = _env_bool("DELETE_AFTER_CONVERT")
 DEDUP_ENABLED = _env_bool("DEDUP_ENABLED")
 DEDUP_BYTES = max(64 * 1024, _env_int("DEDUP_BYTES", 2 * 1024 * 1024))
 DEDUP_FILE = os.getenv("DEDUP_FILE", "").strip() or os.path.join(DATA_DIR, "dedup_hashes.json")
+# Storico di channels.json: una copia (nome, piattaforma, qualità e stato di ogni canale) a ogni
+# modifica della lista, tenendo le ultime CHANNELS_BACKUPS. 0 disattiva lo storico.
+CHANNELS_BACKUPS = max(0, min(50, _env_int("CHANNELS_BACKUPS", 10)))
+BACKUP_DIR = os.path.join(DATA_DIR, "backups")
 HISTORY_FILE = os.getenv("HISTORY_FILE", "").strip() or os.path.join(DATA_DIR, "channel_history.json")
 # Titolo, categoria e rerun di ogni file: accanto a channels.json, non tra i video.
 RECORDINGS_META_FILE = os.path.join(DATA_DIR, "recordings_meta.json")
@@ -101,7 +105,14 @@ ONLINE_CHECK_INTERVAL = max(10, _env_int("ONLINE_CHECK_INTERVAL", 30))
 OFFLINE_CHECK_INTERVAL = max(10, _env_int("OFFLINE_CHECK_INTERVAL", max(30, CHECK_INTERVAL)))
 ERROR_CHECK_INTERVAL = max(10, _env_int("ERROR_CHECK_INTERVAL", 120))
 RECORDER_OFFLINE_GRACE_SECONDS = max(0, _env_int("RECORDER_OFFLINE_GRACE_SECONDS", 15))
-LIVE_STREAM_BUFFER_BYTES = max(512 * 1024, _env_int("LIVE_STREAM_BUFFER_BYTES", 4 * 1024 * 1024))
+# 8 MB: anche a 1080p60 (Kick, YouTube) contengono almeno un fotogramma chiave per le copertine.
+LIVE_STREAM_BUFFER_BYTES = max(512 * 1024, _env_int("LIVE_STREAM_BUFFER_BYTES", 8 * 1024 * 1024))
+# Registrazione ferma: se non arrivano dati per questi secondi Streamlink e FFmpeg vengono chiusi
+# e il canale ricontrollato. Evita registrazioni "appese" su flussi morti. 0 = disattivato.
+# Su Twitch, con le pubblicità filtrate (SKIP_TWITCH_ADS) il flusso si ferma durante la pausa
+# pubblicitaria: lì l'attesa è di almeno 5 minuti.
+_stall = _env_int("RECORDING_STALL_SECONDS", 180)
+RECORDING_STALL_SECONDS = 0 if _stall <= 0 else max(60, _stall)
 PREVIEW_STARTUP_TIMEOUT_SECONDS = max(30, min(600, _env_int("PREVIEW_STARTUP_TIMEOUT_SECONDS", 120)))
 PREVIEW_IDLE_TIMEOUT_SECONDS = max(30, min(900, _env_int("PREVIEW_IDLE_TIMEOUT_SECONDS", 180)))
 # Dopo che l'ultimo spettatore chiude il player, la sorgente temporanea resta aperta
