@@ -612,3 +612,96 @@ def test_preview_error_reason_reaches_status(client):
     ch = next(c for c in client.get("/api/status").get_json()["channels"] if c["name"] == "offpreview")
     assert "nessun flusso" in ch["preview_error"]
     _api(client, action="remove", channel="offpreview")
+
+
+# ── Flusso condiviso: keyframe, nuovi segmenti, spettatori ──
+
+def _pid(pkt):
+    return ((pkt[1] & 0x1F) << 8) | pkt[2]
+
+
+def _is_video_key(pkt):
+    afc = (pkt[3] >> 4) & 3
+    if not (pkt[1] & 0x40) or afc != 3 or not pkt[4] or not pkt[5] & 0x40:
+        return False
+    off = 5 + pkt[4]
+    return pkt[off:off + 3] == b"\x00\x00\x01" and 0xE0 <= pkt[off + 3] <= 0xEF
+
+
+@pytest.mark.parametrize("chunk_size", [188 * 7, 64 * 1024 + 13])
+def test_hub_new_reader_starts_on_keyframe_with_tables(sample_ts, chunk_size):
+    data = open(sample_ts, "rb").read()
+    hub = LiveStreamHub(max_bytes=4 * 1024 * 1024)
+    hub.new_generation()
+    for i in range(0, len(data), chunk_size):
+        hub.publish(data[i:i + chunk_size])
+    first = next(hub.iter_chunks(keyframe=True, timeout=0.2))
+    packets = [first[i:i + 188] for i in range(0, len(first), 188)]
+    assert _pid(packets[0]) == 0, "il primo pacchetto deve essere la PAT"
+    assert any(_is_video_key(p) for p in packets[:6]), "subito dopo PAT/PMT deve esserci un keyframe"
+    assert len(first) < len(data)
+
+
+def test_hub_generation_change_closes_old_readers_and_adopts_waiting_ones(sample_ts):
+    data = open(sample_ts, "rb").read()
+    hub = LiveStreamHub()
+    hub.new_generation()
+    hub.publish(data)
+    active = hub.iter_chunks(keyframe=True, timeout=0.2)
+    assert next(active)
+    hub.end_generation()
+    waiting = hub.iter_chunks(keyframe=True, timeout=0.2)
+    assert next(waiting) == b""                  # niente dati vecchi a chi arriva tra due segmenti
+    hub.new_generation()
+    hub.publish(data)
+    assert list(active) == []                    # il lettore del segmento vecchio termina
+    first = next(waiting)                        # chi aspettava si aggancia al nuovo segmento
+    assert first and _pid(first[:188]) == 0
+
+
+def test_shared_buffer_survives_segment_restart(recorder_env, monkeypatch):
+    """Con lo split a ~300 KB la registrazione passa a un nuovo segmento ogni pochi secondi:
+    il buffer condiviso deve restare lo stesso e i lettori ricevere dati da ogni segmento."""
+    monkeypatch.setattr(recorder_env, "MAX_FILE_SIZE", 300 * 1024)
+    rec = recorder_env.Recorder("livesplit", "best", "kick")
+    rec.start()
+    try:
+        hub = rec.shared_stream
+        assert hub is not None, "il buffer esiste dall'inizio della sessione"
+        gens_seen = set()
+        deadline = time.time() + 30
+        while time.time() < deadline and len(gens_seen) < 2:
+            gen = hub.generation
+            got = b""
+            for chunk in hub.iter_chunks(keyframe=True, timeout=0.5):
+                got += chunk
+                if len(got) >= 188 * 50 or (not chunk and time.time() > deadline):
+                    break
+            if got:
+                assert _pid(got[:188]) in (0, 17)    # mai a metà di un GOP
+                gens_seen.add(gen)
+        assert len(gens_seen) >= 2, f"dati ricevuti solo dai segmenti {gens_seen}"
+        assert rec.shared_stream is hub, "il buffer non deve cambiare tra un segmento e l'altro"
+    finally:
+        rec.stop(wait=10)
+    assert _wait_until(lambda: not rec.is_recording, 15)
+    assert hub.closed
+
+
+def test_viewer_released_even_if_never_iterated(client, monkeypatch):
+    from twrec import preview
+    _api(client, action="add", channel="pvrel", platform="kick")
+    rec = state.recorders["pvrel"]
+    hub = LiveStreamHub()
+    monkeypatch.setattr(preview.PreviewSource, "start", lambda self: None)
+    with rec._lock:
+        rec.is_recording, rec.shared_stream = True, hub
+    try:
+        source = preview.get_or_create("kick", "pvrel")
+        assert source.mode == "shared" and source.viewers == 1
+        preview.stream(source).close()           # client disconnesso prima del primo byte
+        assert source.viewers == 0
+    finally:
+        with rec._lock:
+            rec.is_recording, rec.shared_stream = False, None
+        _api(client, action="remove", channel="pvrel")

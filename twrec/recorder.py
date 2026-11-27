@@ -155,6 +155,11 @@ class Recorder:
             self.started_at = time.time()
             self.last_error = ""
             self.session_bytes = 0
+            # Un solo buffer per tutta la sessione: i player restano agganciati tra un
+            # segmento e l'altro (riconnessioni, split) invece di aprire un secondo flusso.
+            if self.shared_stream is not None:
+                self.shared_stream.close()
+            self.shared_stream = LiveStreamHub()
             self._thread = threading.Thread(target=self._manager_loop, daemon=True,
                                             name=f"rec-{self.channel_name}")
             self._thread.start()
@@ -292,10 +297,11 @@ class Recorder:
             self._split_triggered = False
             filename = storage.generate_filename(self.channel_name)
             output_path = os.path.join(RECORDINGS_DIR, filename)
-            hub = LiveStreamHub()
             with self._lock:
                 self.output_path = output_path
-                self.shared_stream = hub
+                hub = self.shared_stream
+                if hub is None or hub.closed:
+                    hub = self.shared_stream = LiveStreamHub()
 
             streamlink_cmd = streamlink_base_command(self.platform) + [
                 "--stdout", platform_url(self.platform, self.channel_name), fallback_list(self.quality),
@@ -320,6 +326,7 @@ class Recorder:
                     source.stdout.close()
                     with self._lock:
                         self.source_process, self.process = source, process
+                    hub.new_generation()
                     if self.stop_requested:
                         terminate(process)
                         terminate(source)
@@ -367,10 +374,8 @@ class Recorder:
                             proc.stdout.close()
                         except (OSError, ValueError):
                             pass
-                hub.close()
+                hub.end_generation()
                 with self._lock:
-                    if self.shared_stream is hub:
-                        self.shared_stream = None
                     if self.process is process:
                         self.process = None
                     if self.source_process is source:

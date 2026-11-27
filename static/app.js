@@ -808,7 +808,7 @@
   };
 
   const P = {
-    mts: null, src: null, timers: {}, tries: 0, lastTime: -1, lastMove: 0, idleSince: 0,
+    mts: null, src: null, timers: {}, tries: 0, lastTime: -1, lastMove: 0, idleSince: 0, played: false,
     el: () => $("#player"), v: () => $("#video"),
   };
   const MAX_TRIES = 6;
@@ -837,6 +837,7 @@
     v.muted = store.get("tr-muted", "0") === "1";
     v.volume = Math.min(1, Math.max(0, Number(store.get("tr-volume", "0.8")) || 0.8));
     v.onplaying = () => {
+      P.played = true;
       pStatus("");
       clearTimeout(P.timers.stable);
       P.timers.stable = setTimeout(() => { P.tries = 0; }, 60000);
@@ -868,13 +869,18 @@
       );
       P.mts = m;
       m.attachMediaElement(v);
+      if (src.live) {
+        // Il server chiude il flusso quando la registrazione passa al segmento successivo:
+        // ci si ricollega subito invece di aspettare che il video si fermi.
+        m.on(mpegts.Events.LOADING_COMPLETE, () => { if (P.mts === m) pReconnect("il flusso è ripartito", 0, { soft: P.played }); });
+      }
       m.on(mpegts.Events.ERROR, (type, detail, info) => {
         if (P.mts !== m) return;
         console.warn("[player]", type, detail, info);
         const reason = type === mpegts.ErrorTypes?.MEDIA_ERROR ? "errore di decodifica"
           : /HttpStatusCodeInvalid/i.test(detail) ? `il server ha risposto ${info?.code || "con un errore"}`
             : /Timeout/i.test(detail) ? "nessuna risposta dal server" : "connessione interrotta";
-        if (src.live) pReconnect(reason, Number(info?.code) || 0);
+        if (src.live) pReconnect(reason, Number(info?.code) || 0, { soft: P.played && type !== mpegts.ErrorTypes?.MEDIA_ERROR });
         else pStatus("Il file non si può riprodurre nel browser. Puoi scaricarlo.", { error: true });
       });
       m.load();
@@ -882,7 +888,7 @@
       v.src = src.url;
     }
     pStatus("Caricamento…");
-    P.lastTime = -1; P.idleSince = Date.now();
+    P.lastTime = -1; P.idleSince = Date.now(); P.played = false;
     pAutoplay(v);
     clearInterval(P.timers.watch);
     if (src.live) P.timers.watch = setInterval(pWatchdog, 2000);
@@ -897,27 +903,60 @@
     });
   }
 
-  // Se il video resta fermo (nessun avanzamento) per 15 s mentre dovrebbe suonare, si riconnette.
+  // Se la posizione cade fuori dai dati scaricati (inizio con audio e video sfalsati, buco
+  // dopo una riconnessione della sorgente) il video resterebbe fermo: salta al primo dato utile.
+  function pSkipGap(v) {
+    const b = v.buffered;
+    if (!b.length) return false;
+    const t = v.currentTime;
+    for (let i = 0; i < b.length; i++) {
+      if (t < b.start(i) - 0.05) {
+        if (b.end(i) - b.start(i) < 0.2) continue;
+        v.currentTime = b.start(i) + 0.05;
+        return true;
+      }
+      if (t <= b.end(i) - 0.05) return false;   // dentro un intervallo: tutto a posto
+    }
+    return false;
+  }
+
+  // Se il video resta fermo (nessun avanzamento) per 12 s mentre dovrebbe suonare, si riconnette.
   function pWatchdog() {
     const v = P.v();
     if (!P.src?.live || v.paused) { P.idleSince = Date.now(); return; }
     if (v.currentTime !== P.lastTime) { P.lastTime = v.currentTime; P.idleSince = Date.now(); }
-    else if (Date.now() - P.idleSince > 15000) { pReconnect("flusso fermo"); return; }
+    else if (Date.now() - P.idleSince > 3000 && pSkipGap(v)) { P.idleSince = Date.now(); return; }
+    else if (Date.now() - P.idleSince > 12000) { pReconnect("flusso fermo", 0, { soft: P.played }); return; }
     // Troppo indietro rispetto alla diretta (dopo una pausa o un rallentamento): salta in avanti.
     const edge = v.buffered.length ? v.buffered.end(v.buffered.length - 1) : 0;
     if (edge - v.currentTime > 25) v.currentTime = edge - 3;
     pSync();
   }
 
-  function pReconnect(reason, status) {
+  // soft: il flusso funzionava e si è solo interrotto (nuovo segmento, rete): non conta come
+  // tentativo fallito e si riparte quasi subito.
+  function pReconnect(reason, status, { soft = false } = {}) {
     if (!P.src?.live || P.timers.retry) return;
     // Motivo fornito dal server (es. 403 della piattaforma o diretta appena finita).
     const ch = P.src.channel ? S.channels.get(P.src.channel.name) : null;
     if (status === 503 && ch?.preview_error) reason = ch.preview_error;
     clearInterval(P.timers.watch);
+    if (soft) {
+      P.tries = 0;
+      pStatus("Riconnessione alla diretta…");
+      P.timers.retry = setTimeout(() => { P.timers.retry = null; pAttach(); }, 600);
+      return;
+    }
     if (P.tries >= MAX_TRIES) {
       pDetach();
-      pStatus(`La diretta non risponde: ${reason}.`, { error: true, retry: true });
+      // Se il canale è ancora in onda o in REC si continua a riprovare con calma, invece di
+      // lasciare il player fermo su un errore mentre la registrazione va avanti.
+      if (ch && (ch.online || ch.actually_recording)) {
+        pStatus(`La diretta non risponde: ${reason}. Nuovo tentativo tra 20 s…`, { error: true, retry: true });
+        P.timers.retry = setTimeout(() => { P.timers.retry = null; P.tries = MAX_TRIES - 1; pAttach(); }, 20000);
+      } else {
+        pStatus(`La diretta non risponde: ${reason}.`, { error: true, retry: true });
+      }
       return;
     }
     P.tries++;
@@ -1144,7 +1183,7 @@
   $("#pcLive").addEventListener("click", () => {
     const v = pv(); if (v.buffered.length) v.currentTime = v.buffered.end(v.buffered.length - 1) - 2; v.play().catch(() => {});
   });
-  $("#playerRetry").addEventListener("click", () => { P.tries = 0; pAttach(); });
+  $("#playerRetry").addEventListener("click", () => { clearTimeout(P.timers.retry); P.timers.retry = null; P.tries = 0; pAttach(); });
   $("#playerDetails").addEventListener("click", () => {
     const name = P.src?.channel?.name;
     closePlayer();

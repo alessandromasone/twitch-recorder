@@ -5,6 +5,15 @@ diventa automaticamente la nota della GitHub Release quando si pubblica il tag `
 
 ## Non rilasciato
 
+## 2.2.2
+
+- **Preview che non partiva durante la REC**: il player riceveva il buffer dall'inizio, di solito a metà di un GOP e senza PAT/PMT, e poteva restare su «Caricamento…» o nero. Ora chi si collega parte dall'ultimo keyframe video con PAT e PMT davanti e vede l'immagine subito, con meno ritardo.
+- **Preview e nuovi segmenti** (split, riconnessioni): ogni segmento creava un buffer nuovo e nei secondi tra un segmento e l'altro la preview apriva un secondo Streamlink verso la piattaforma, che restava aperto finché si guardava. Ora il buffer dura quanto la sessione di REC e a ogni segmento il player si ricollega in meno di un secondo allo stesso flusso.
+- Spettatori contati in modo affidabile: il flusso temporaneo non si chiude sotto chi si è appena collegato e il contatore non resta appeso se il client si disconnette subito.
+- Player: salta i buchi nel buffer invece di restare fermo; una riconnessione dopo che il video andava non conta tra i tentativi falliti; se il canale è ancora in onda o in REC continua a riprovare ogni 20 s.
+
+## 2.2.1
+
 - **Kick: niente più "in REC" senza file quando il canale è offline.** Se streamlink si collega ma non arriva video, la registrazione non riparte più all'infinito: un segmento conta come riuscito solo se ha scritto almeno 256 KB, e dopo 3 minuti senza video la REC si chiude con un messaggio chiaro.
 - **Pausa dopo un tentativo a vuoto**: se un'intera sessione non ha ricevuto video, il canale aspetta 5, 10, 20 e poi 30 minuti prima di riprovare. **Controlla ora** (o Registra) annulla l'attesa.
 - **Stato più onesto nell'interfaccia**: il badge REC compare solo quando i dati arrivano davvero. Mentre il flusso si sta collegando, o se si ferma, il canale mostra "Connessione al flusso…" e il file vuoto non compare tra le registrazioni.

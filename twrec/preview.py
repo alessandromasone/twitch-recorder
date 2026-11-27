@@ -133,7 +133,9 @@ class PreviewSource:
     def _feed_from_rec(self) -> None:
         stdin = self.ffmpeg.stdin
         try:
-            for payload in self.rec_hub.iter_chunks(from_start=True):
+            # Dall'ultimo keyframe della REC; a un riavvio del segmento l'iteratore termina,
+            # FFmpeg si chiude e il player si ricollega al nuovo segmento.
+            for payload in self.rec_hub.iter_chunks(keyframe=True):
                 if self._stopped or self.ffmpeg.poll() is not None:
                     break
                 if payload:
@@ -184,25 +186,25 @@ class PreviewSource:
             self.viewers = max(0, self.viewers - 1)
             if self.viewers == 0 and not self._stopped:
                 linger = PREVIEW_LINGER_SECONDS if self.mode == "temporary" else 0
-                if linger:
-                    self._linger_timer = threading.Timer(linger, self._stop_if_unused)
-                    self._linger_timer.daemon = True
-                    self._linger_timer.start()
-                else:
-                    threading.Thread(target=self.stop, daemon=True).start()
+                if self._linger_timer:
+                    self._linger_timer.cancel()
+                self._linger_timer = threading.Timer(max(0.05, linger), self._stop_if_unused)
+                self._linger_timer.daemon = True
+                self._linger_timer.start()
         state.request_broadcast()
 
     def _stop_if_unused(self) -> None:
-        with _lock:
-            if self.viewers:
-                return
-        self.stop()
+        # Controllo e arresto atomici: uno spettatore arrivato nel frattempo non perde il flusso.
+        self.stop(only_if_unused=True)
 
-    def stop(self) -> None:
-        if self._stopped:
-            return
-        self._stopped = True
+    def stop(self, only_if_unused: bool = False) -> None:
         with _lock:
+            if self._stopped or (only_if_unused and self.viewers):
+                return
+            self._stopped = True
+            if self._linger_timer:
+                self._linger_timer.cancel()
+                self._linger_timer = None
             if _sources.get(_key(self.platform, self.room)) is self:
                 _sources.pop(_key(self.platform, self.room), None)
         self.hub.close()
@@ -228,25 +230,73 @@ def get_or_create(platform: str, room: str) -> PreviewSource:
     with _lock:
         source = _sources.get(key)
         wanted_mode = "shared" if rec_hub else "temporary"
-        if source and source.alive and (source.mode == wanted_mode or wanted_mode == "temporary"):
+        if source and source.alive and source.mode == wanted_mode \
+                and (wanted_mode != "shared" or source.rec_hub is rec_hub):
+            # Lo spettatore viene contato subito, prima che il timer di chiusura possa scattare.
+            _acquire_locked(source)
             return source
         old = source
         source = PreviewSource(platform, room, wanted_mode, rec_hub, quality)
         _sources[key] = source
     if old:
         old.stop()
-    source.start()
+    try:
+        source.start()
+    except Exception:
+        source.stop()
+        raise
+    with _lock:
+        _acquire_locked(source)
     logger.info("Preview %s avviata per %s", "condivisa" if wanted_mode == "shared" else "temporanea", room)
     return source
 
 
-def stream(source: PreviewSource):
-    """Generatore HTTP per uno spettatore."""
-    source.acquire()
+def _acquire_locked(source: "PreviewSource") -> None:
+    source.viewers += 1
+    if source._linger_timer:
+        source._linger_timer.cancel()
+        source._linger_timer = None
+
+
+class ViewerStream:
+    """Corpo della risposta HTTP di uno spettatore già contato da get_or_create.
+
+    close() viene chiamato dal server WSGI anche se il client si disconnette prima che
+    l'iterazione cominci: il contatore degli spettatori non resta mai "appeso".
+    """
+
+    def __init__(self, source: "PreviewSource"):
+        self.source = source
+        self._released = False
+        self._gen = _stream_body(source)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return next(self._gen)
+
+    def close(self) -> None:
+        try:
+            self._gen.close()
+        finally:
+            if not self._released:
+                self._released = True
+                self.source.release()
+
+
+def stream(source: PreviewSource) -> ViewerStream:
+    """Risposta HTTP per uno spettatore (già contato da get_or_create)."""
+    state.request_broadcast()
+    return ViewerStream(source)
+
+
+def _stream_body(source: PreviewSource):
     received = False
     last_data = time.time()
     try:
-        for chunk in source.hub.iter_chunks(from_start=True, timeout=5):
+        # Si parte dall'ultimo keyframe con PAT/PMT: il browser decodifica subito.
+        for chunk in source.hub.iter_chunks(keyframe=True, timeout=5):
             if chunk:
                 received = True
                 last_data = time.time()
@@ -256,10 +306,8 @@ def stream(source: PreviewSource):
             if time.time() - last_data > limit:
                 logger.warning("Preview di %s senza dati per %ss: chiusura", source.room, limit)
                 break
-    except (GeneratorExit, BrokenPipeError, ConnectionResetError):
+    except (BrokenPipeError, ConnectionResetError):
         pass
-    finally:
-        source.release()
 
 
 def close_temporary(room: str) -> None:
